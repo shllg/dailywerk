@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -e
+
+echo "== Installing Ruby dependencies =="
+bundle check || bundle install
+
+echo ""
+echo "== Installing frontend dependencies =="
+cd frontend && npm install && cd ..
+
+echo ""
+echo "== Starting Docker services =="
+docker compose up -d --wait
+
+echo ""
+echo "== Preparing database =="
+bin/rails db:prepare
+
+echo ""
+echo "== Removing old logs and tempfiles =="
+bin/rails log:clear tmp:clear
+
+echo ""
+echo "Setup complete! Run bin/dev to start the application."

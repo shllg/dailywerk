@@ -1,0 +1,27 @@
+# Ruby / Rails
+/.bundle
+/vendor/bundle
+/log/*
+/tmp/*
+!/log/.keep
+!/tmp/.keep
+/tmp/pids/*
+!/tmp/pids/
+!/tmp/pids/.keep
+/storage/*
+!/storage/.keep
+/tmp/storage/*
+!/tmp/storage/
+!/tmp/storage/.keep
+/config/*.key
+
+# Environment files
+/.env*
+!/.env.development.example
+
+# Frontend
+/frontend/node_modules
+/frontend/dist
+
+# OS
+.DS_Store
