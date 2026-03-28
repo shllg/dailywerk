@@ -438,7 +438,7 @@ ENV_ISOLATED
   (
     cd "$worktree_dir"
     run_quiet "bundle install" bundle install --quiet
-    run_quiet "npm install" bash -c "cd frontend && npm install --silent"
+    run_quiet "pnpm install" bash -c "cd frontend && pnpm install --silent"
 
     if [ "$db_mode" = "new" ]; then
       say cyan "  Preparing isolated database '${db_name}'..."
@@ -520,7 +520,7 @@ worktree_update() {
     fi
 
     run_quiet "bundle install" bundle install --quiet
-    run_quiet "npm install" bash -c "cd frontend && npm install --silent"
+    run_quiet "pnpm install" bash -c "cd frontend && pnpm install --silent"
     run_quiet "database migrate" bin/rails db:migrate
   )
   say green "Worktree updated: ${worktree_dir}"

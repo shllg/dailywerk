@@ -14,16 +14,16 @@ Rails 8.1 API + React 19 SPA for daily work management.
 cp .env.development.example .env.development
 docker compose up -d
 bin/rails db:setup
-cd frontend && npm install
+cd frontend && pnpm install
 ```
 
 ## Development
 
 ```bash
-bin/rails server          # API on :3000
-cd frontend && npm run dev # SPA on :5173
-bin/rails test            # backend tests
-cd frontend && npm test   # frontend tests
+bin/rails server            # API on :3000
+cd frontend && pnpm dev     # SPA on :5173
+bin/rails test              # backend tests
+cd frontend && pnpm test    # frontend tests
 ```
 
 ## Commit Messages
