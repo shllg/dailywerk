@@ -1,24 +1,42 @@
-# README
+# Dailywerk
 
-This README would normally document whatever steps are necessary to get the
-application up and running.
+Rails 8.1 API + React 19 SPA for daily work management.
 
-Things you may want to cover:
+## Stack
 
-* Ruby version
+- **Backend**: Ruby 4.0, Rails 8.1 (API-only), PostgreSQL 17, Redis 7, GoodJob
+- **Frontend**: React 19, TypeScript, Vite 8
+- **Storage**: RustFS (S3-compatible)
 
-* System dependencies
+## Setup
 
-* Configuration
+```bash
+cp .env.development.example .env.development
+docker compose up -d
+bin/rails db:setup
+cd frontend && npm install
+```
 
-* Database creation
+## Development
 
-* Database initialization
+```bash
+bin/rails server          # API on :3000
+cd frontend && npm run dev # SPA on :5173
+bin/rails test            # backend tests
+cd frontend && npm test   # frontend tests
+```
 
-* How to run the test suite
+## Commit Messages
 
-* Services (job queues, cache servers, search engines, etc.)
+Format: `[CATEGORY] Short imperative summary` (50 chars max, no trailing punctuation)
 
-* Deployment instructions
+| Category     | Use for                                  |
+|--------------|------------------------------------------|
+| `[FIX]`      | Bug fixes                                |
+| `[FEATURE]`  | New functionality                        |
+| `[REFACTOR]` | Code restructuring without behavior change |
+| `[CHORE]`    | Tooling, config, dev-only changes        |
+| `[TEST]`     | Test-only changes                        |
+| `[DOCS]`     | Documentation                            |
 
-* ...
+Body (optional): bullet points, imperative mood.
