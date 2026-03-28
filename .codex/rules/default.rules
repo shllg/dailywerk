@@ -1,0 +1,8 @@
+Follow Rails 8 conventions and the patterns documented in CLAUDE.md.
+Use UUIDv7 for all new primary keys: id :uuid, default: -> { "gen_random_uuid_v7()" }.
+Falcon server: use fiber-safe patterns only (no Thread.current, no blocking I/O, no lazy mutex).
+GoodJob external mode only — never inline or async execution.
+Use strong_migrations gem for safe database migrations.
+ActiveRecord::Encryption for API keys and credentials (non-deterministic).
+Use pnpm for frontend packages (never yarn/npm).
+Never auto-commit or push to git.
