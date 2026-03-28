@@ -1,11 +1,26 @@
 #!/usr/bin/env bash
 set -e
 
-echo "Starting Docker services..."
-docker compose up -d --wait
+# Load worktree overrides if present (ports, DB, Redis, etc.)
+if [ -f .env.worktree ]; then
+  set -a
+  source .env.worktree
+  set +a
+fi
 
-echo "Preparing database..."
-bin/rails db:prepare
+# Defaults
+export PORT="${PORT:-3000}"
+export VITE_PORT="${VITE_PORT:-5173}"
+export VITE_API_PORT="${VITE_API_PORT:-$PORT}"
+
+# Start Docker services unless told to skip (worktrees share main's stack)
+if [ "${SKIP_DOCKER:-0}" != "1" ]; then
+  echo "Starting Docker services..."
+  docker compose up -d --wait
+
+  echo "Preparing database..."
+  bin/rails db:prepare
+fi
 
 echo "Starting all processes..."
 if command -v overmind >/dev/null 2>&1; then

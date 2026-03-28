@@ -9,11 +9,11 @@ default: &default
 
 development:
   <<: *default
-  database: dailywerk_development
+  database: <%= ENV.fetch("DB_NAME") { "dailywerk_development" } %>
 
 test:
   <<: *default
-  database: dailywerk_test
+  database: <%= ENV.fetch("DB_NAME_TEST") { "dailywerk_test" } %>
 
 production:
   <<: *default

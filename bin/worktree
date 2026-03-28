@@ -1,0 +1,742 @@
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+# Resolve the main repository root (works from inside any worktree)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+GIT_COMMON_DIR="$(git -C "$SCRIPT_DIR" rev-parse --git-common-dir 2>/dev/null || true)"
+if [ -n "$GIT_COMMON_DIR" ]; then
+  if [ "${GIT_COMMON_DIR#/}" = "$GIT_COMMON_DIR" ]; then
+    GIT_COMMON_DIR="${SCRIPT_DIR}/${GIT_COMMON_DIR}"
+  fi
+  ROOT_DIR="$(cd "${GIT_COMMON_DIR}/.." && pwd -P)"
+else
+  ROOT_DIR="$SCRIPT_DIR"
+fi
+
+PARENT_DIR="$(cd "${ROOT_DIR}/.." && pwd -P)"
+CURRENT_BRANCH="$(git -C "$SCRIPT_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+WT_PREFIX="dailywerk-wt"
+PORT_MIN=3101
+PORT_MAX=3199
+REDIS_DB_MIN=2
+REDIS_DB_MAX=15
+
+# --- Output helpers ---
+
+supports_color() { [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; }
+
+say() {
+  local color="$1"; shift
+  if supports_color; then
+    case "$color" in
+      red)    printf '\033[31m%s\033[0m\n' "$*" ;;
+      green)  printf '\033[32m%s\033[0m\n' "$*" ;;
+      yellow) printf '\033[33m%s\033[0m\n' "$*" ;;
+      cyan)   printf '\033[36m%s\033[0m\n' "$*" ;;
+      bold)   printf '\033[1m%s\033[0m\n' "$*" ;;
+      *)      printf '%s\n' "$*" ;;
+    esac
+  else
+    printf '%s\n' "$*"
+  fi
+}
+
+die() { say red "$1" >&2; exit 1; }
+
+run_quiet() {
+  local label="$1"; shift
+  say cyan "  $label..."
+  local log; log="$(mktemp)"
+  if "$@" >"$log" 2>&1; then
+    say green "  $label done"
+  else
+    say red "  $label failed:"
+    cat "$log" >&2
+    rm -f "$log"
+    exit 1
+  fi
+  rm -f "$log"
+}
+
+# --- Utility functions ---
+
+slugify() {
+  printf '%s' "$1" \
+    | sed -E 's|^(refs/)?(remotes/)?(origin/)?||' \
+    | sed -E 's|^(feature|bugfix|hotfix|fix|chore)/||' \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g; s/-+/-/g' \
+    | cut -c1-20
+}
+
+port_in_use() {
+  lsof -i :"$1" >/dev/null 2>&1
+}
+
+parse_port_from_env() {
+  sed -nE 's/^PORT=([0-9]+).*/\1/p' "$1" 2>/dev/null | head -n1
+}
+
+parse_env_value() {
+  local file="$1" key="$2"
+  [ -f "$file" ] || return 1
+
+  awk -F= -v lookup_key="$key" '
+    $0 ~ /^[[:space:]]*#/ { next }
+    index($0, "=") == 0 { next }
+    {
+      key = $1
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+      if (key == lookup_key) {
+        value = substr($0, index($0, "=") + 1)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        gsub(/^"/, "", value)
+        gsub(/"$/, "", value)
+        gsub(/^'\''/, "", value)
+        gsub(/'\''$/, "", value)
+        print value
+        exit
+      }
+    }
+  ' "$file"
+}
+
+parse_redis_db_from_env() {
+  local redis_url
+  redis_url="$(parse_env_value "$1" "REDIS_URL" 2>/dev/null || true)"
+  if [ -n "$redis_url" ]; then
+    printf '%s' "$redis_url" | sed -nE 's|^redis://[^/]+/([0-9]+).*|\1|p'
+  fi
+}
+
+branch_for_path() {
+  local target="$1" wt_path="" line
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *) wt_path="${line#worktree }" ;;
+      branch\ *)
+        if [ "$wt_path" = "$target" ]; then
+          printf '%s' "${line#branch refs/heads/}"
+          return 0
+        fi
+        ;;
+    esac
+  done < <(git -C "$ROOT_DIR" worktree list --porcelain)
+  return 1
+}
+
+path_for_branch() {
+  local target="$1" wt_path="" line
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *) wt_path="${line#worktree }" ;;
+      branch\ *)
+        local b="${line#branch refs/heads/}"
+        if [ "$b" = "$target" ]; then
+          printf '%s' "$wt_path"
+          return 0
+        fi
+        ;;
+    esac
+  done < <(git -C "$ROOT_DIR" worktree list --porcelain)
+  return 1
+}
+
+discover_used_ports() {
+  local envfile port_value
+  shopt -s nullglob
+  for envfile in "${PARENT_DIR}"/${WT_PREFIX}-*/.env.worktree; do
+    port_value="$(parse_port_from_env "$envfile")"
+    [ -n "$port_value" ] && printf '%s\n' "$port_value"
+  done
+  shopt -u nullglob
+}
+
+discover_used_redis_dbs() {
+  local envfile db_value
+  shopt -s nullglob
+  for envfile in "${PARENT_DIR}"/${WT_PREFIX}-*/.env.worktree; do
+    db_value="$(parse_redis_db_from_env "$envfile")"
+    [ -n "$db_value" ] && printf '%s\n' "$db_value"
+  done
+  shopt -u nullglob
+}
+
+allocate_port() {
+  local used_ports candidate
+  used_ports="$(discover_used_ports)"
+  for candidate in $(seq $PORT_MIN $PORT_MAX); do
+    if ! printf '%s\n' "$used_ports" | grep -qx "$candidate" && ! port_in_use "$candidate"; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+allocate_redis_db() {
+  local used_dbs candidate
+  used_dbs="$(discover_used_redis_dbs)"
+  for candidate in $(seq $REDIS_DB_MIN $REDIS_DB_MAX); do
+    if ! printf '%s\n' "$used_dbs" | grep -qx "$candidate"; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+resolve_worktree_path() {
+  local target="${1:-}" worktree_dir=""
+
+  if [ -z "$target" ]; then
+    worktree_dir="$(pwd -P)"
+  elif [ -d "$target" ]; then
+    worktree_dir="$(cd "$target" && pwd -P)"
+  else
+    worktree_dir="${PARENT_DIR}/${WT_PREFIX}-${target}"
+  fi
+
+  if ! git -C "$ROOT_DIR" worktree list --porcelain | grep -q "^worktree ${worktree_dir}$"; then
+    die "Worktree not found: ${worktree_dir}"
+  fi
+
+  printf '%s' "$worktree_dir"
+}
+
+# --- Commands ---
+
+usage() {
+  cat <<USAGE
+Usage: bin/worktree <command> [args]
+
+Commands:
+  setup   <branch> [--from <source>] [--port <port>] [--db-mode <shared|new>]
+  update  [<slug|path>]
+  cleanup [--force] <slug|path>
+  list
+
+If no command is provided, defaults to 'list'.
+
+Examples:
+  bin/worktree setup feature/calendar-sync
+  bin/worktree setup feature/calendar-sync --db-mode new
+  bin/worktree setup new-feature --from main
+  bin/worktree setup feature/api --port 3105
+  bin/worktree update calendar-sync
+  bin/worktree update
+  bin/worktree cleanup calendar-sync
+  bin/worktree cleanup --force calendar-sync
+USAGE
+}
+
+worktree_setup() {
+  local branch="" port="" create_from="" db_mode=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --from)      create_from="${2:-}"; shift 2 ;;
+      --from=*)    create_from="${1#*=}"; shift ;;
+      --port)      port="${2:-}"; shift 2 ;;
+      --port=*)    port="${1#*=}"; shift ;;
+      --db-mode)   db_mode="${2:-}"; shift 2 ;;
+      --db-mode=*) db_mode="${1#*=}"; shift ;;
+      -h|--help)   usage; exit 0 ;;
+      --)          shift; break ;;
+      -*)          die "Unknown option: $1" ;;
+      *)
+        if [ -z "$branch" ]; then
+          branch="$1"; shift
+        else
+          die "Unexpected argument: $1"
+        fi
+        ;;
+    esac
+  done
+
+  # Interactive branch picker via fzf
+  if [ -z "$branch" ]; then
+    if [ -t 0 ] && command -v fzf >/dev/null 2>&1; then
+      local branch_list
+      branch_list="$(git -C "$ROOT_DIR" branch --format '%(refname:short)')"
+      if [ -n "$CURRENT_BRANCH" ]; then
+        branch_list="$(printf '%s\n' "$branch_list" | grep -Fvx "$CURRENT_BRANCH" || true)"
+      fi
+      branch="$(printf '%s\n' "$branch_list" | fzf \
+        --prompt 'Branch for worktree: ' \
+        --preview "git -C '$ROOT_DIR' log --oneline --graph --decorate --color=always {}" \
+        || true)"
+    fi
+    [ -z "$branch" ] && { usage; exit 1; }
+  fi
+
+  if [ -n "$db_mode" ] && [ "$db_mode" != "shared" ] && [ "$db_mode" != "new" ]; then
+    die "Invalid --db-mode '${db_mode}' (expected: shared or new)"
+  fi
+
+  # Validate --from source
+  if [ -n "$create_from" ]; then
+    if ! git -C "$ROOT_DIR" rev-parse --verify "${create_from}^{commit}" >/dev/null 2>&1; then
+      die "Source branch not found: $create_from"
+    fi
+    if git -C "$ROOT_DIR" rev-parse --verify "refs/heads/${branch}" >/dev/null 2>&1; then
+      say yellow "Branch '${branch}' already exists -- ignoring --from"
+    else
+      git -C "$ROOT_DIR" branch "$branch" "$create_from"
+      say green "Created branch '${branch}' from '${create_from}'"
+    fi
+  fi
+
+  # Validate branch exists
+  if ! git -C "$ROOT_DIR" rev-parse --verify "${branch}^{commit}" >/dev/null 2>&1; then
+    die "Branch or ref not found: $branch"
+  fi
+
+  # Refuse if branch is currently checked out here
+  if [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" = "$branch" ]; then
+    die "Branch '${branch}' is already checked out in ${SCRIPT_DIR}"
+  fi
+
+  # Check if branch is used by another worktree
+  local in_use_path
+  in_use_path="$(path_for_branch "$branch" || true)"
+  if [ -n "$in_use_path" ] && [ "$in_use_path" != "$ROOT_DIR" ]; then
+    die "Branch '${branch}' is already used by worktree at '${in_use_path}'"
+  fi
+
+  # Generate slug and worktree path
+  local slug
+  slug="$(slugify "$branch")"
+  [ -z "$slug" ] && die "Could not generate slug from branch: $branch"
+
+  local worktree_dir="${PARENT_DIR}/${WT_PREFIX}-${slug}"
+
+  # Handle slug collision with different branch
+  if [ -d "$worktree_dir" ]; then
+    local existing_branch
+    existing_branch="$(branch_for_path "$worktree_dir" || true)"
+    if [ -n "$existing_branch" ] && [ "$existing_branch" != "$branch" ]; then
+      local suffix=2
+      while [ -d "${PARENT_DIR}/${WT_PREFIX}-${slug}-${suffix}" ]; do
+        suffix=$((suffix + 1))
+      done
+      slug="${slug:0:$((18 - ${#suffix}))}-${suffix}"
+      worktree_dir="${PARENT_DIR}/${WT_PREFIX}-${slug}"
+    fi
+  fi
+
+  # Reuse existing worktree config if re-running setup
+  local env_worktree="${worktree_dir}/.env.worktree"
+  if [ -f "$env_worktree" ] && [ -z "$port" ]; then
+    port="$(parse_port_from_env "$env_worktree")"
+  fi
+  if [ -f "$env_worktree" ] && [ -z "$db_mode" ]; then
+    db_mode="$(parse_env_value "$env_worktree" "WORKTREE_DB_MODE" 2>/dev/null || true)"
+  fi
+  [ -z "$db_mode" ] && db_mode="shared"
+
+  # Allocate/validate port
+  if [ -n "$port" ]; then
+    if ! printf '%s' "$port" | grep -Eq '^[0-9]+$'; then
+      die "Invalid port: $port"
+    fi
+    if [ "$port" -lt $PORT_MIN ] || [ "$port" -gt $PORT_MAX ]; then
+      die "Port out of range (${PORT_MIN}-${PORT_MAX}): $port"
+    fi
+    if port_in_use "$port"; then
+      die "Port already in use: $port"
+    fi
+  else
+    port="$(allocate_port)" || die "No available ports in range ${PORT_MIN}-${PORT_MAX}"
+  fi
+
+  # Compute Vite port from API port offset
+  local vite_port=$(( 5173 + (port - 3100) ))
+
+  # Allocate Redis DB for new mode
+  local redis_db=""
+  if [ "$db_mode" = "new" ]; then
+    if [ -f "$env_worktree" ]; then
+      redis_db="$(parse_redis_db_from_env "$env_worktree" 2>/dev/null || true)"
+    fi
+    if [ -z "$redis_db" ]; then
+      redis_db="$(allocate_redis_db)" || die "No available Redis DBs in range ${REDIS_DB_MIN}-${REDIS_DB_MAX}"
+    fi
+  fi
+
+  # Create git worktree if not already present
+  if [ -d "$worktree_dir" ]; then
+    if ! git -C "$ROOT_DIR" worktree list --porcelain | grep -q "^worktree ${worktree_dir}$"; then
+      die "Directory exists but is not a git worktree: $worktree_dir"
+    fi
+    say yellow "Worktree already exists at ${worktree_dir}, updating configuration..."
+  else
+    say cyan "Creating worktree..."
+    git -C "$ROOT_DIR" worktree add "$worktree_dir" "$branch"
+  fi
+
+  # Copy credentials if present
+  if [ -f "${ROOT_DIR}/config/master.key" ] && [ ! -f "$worktree_dir/config/master.key" ]; then
+    cp "${ROOT_DIR}/config/master.key" "$worktree_dir/config/master.key"
+    say green "  Copied config/master.key"
+  fi
+  if [ -d "${ROOT_DIR}/config/credentials" ]; then
+    mkdir -p "$worktree_dir/config/credentials"
+    local cred_file
+    for cred_file in "${ROOT_DIR}"/config/credentials/*.key "${ROOT_DIR}"/config/credentials/*.yml.enc; do
+      [ -f "$cred_file" ] || continue
+      cp "$cred_file" "$worktree_dir/config/credentials/"
+    done
+    say green "  Copied config/credentials/"
+  fi
+
+  # Compute resource names
+  local slug_underscored="${slug//-/_}"
+  local db_name rustfs_bucket redis_url cable_redis_url
+  if [ "$db_mode" = "new" ]; then
+    db_name="dailywerk_wt_${slug_underscored}"
+    rustfs_bucket="dailywerk-wt-${slug}"
+    redis_url="redis://localhost:6399/${redis_db}"
+    cable_redis_url="redis://localhost:6399/${redis_db}"
+  else
+    db_name=""
+    rustfs_bucket=""
+    redis_url=""
+    cable_redis_url=""
+  fi
+
+  # Write .env.worktree
+  cat > "$worktree_dir/.env.worktree" <<ENV_WORKTREE
+# Worktree: ${branch}
+# DB mode: ${db_mode}
+WORKTREE_SLUG=${slug}
+WORKTREE_DB_MODE=${db_mode}
+SKIP_DOCKER=1
+PORT=${port}
+VITE_PORT=${vite_port}
+VITE_API_PORT=${port}
+CORS_ORIGINS=http://localhost:${vite_port}
+CABLE_PREFIX=dailywerk_wt_${slug_underscored}
+GOOD_JOB_QUEUE_PREFIX=wt_${slug_underscored}
+GOOD_JOB_ENABLE_CRON=false
+COMPOSE_PROJECT_NAME=dailywerk
+ENV_WORKTREE
+
+  if [ "$db_mode" = "new" ]; then
+    cat >> "$worktree_dir/.env.worktree" <<ENV_ISOLATED
+DB_NAME=${db_name}
+REDIS_URL=${redis_url}
+CABLE_REDIS_URL=${cable_redis_url}
+RUSTFS_BUCKET=${rustfs_bucket}
+ENV_ISOLATED
+  fi
+
+  say green "  Generated .env.worktree (port ${port}, vite ${vite_port}, db mode: ${db_mode})"
+
+  # Install dependencies
+  (
+    cd "$worktree_dir"
+    run_quiet "bundle install" bundle install --quiet
+    run_quiet "npm install" bash -c "cd frontend && npm install --silent"
+
+    if [ "$db_mode" = "new" ]; then
+      say cyan "  Preparing isolated database '${db_name}'..."
+      set -a
+      source .env.worktree
+      set +a
+      run_quiet "database prepare" bin/rails db:prepare
+
+      # Create isolated S3 bucket via mc if available
+      if command -v mc >/dev/null 2>&1; then
+        local rustfs_endpoint="${RUSTFS_ENDPOINT:-http://localhost:9002}"
+        local rustfs_alias="dailywerk-local"
+        mc alias set "$rustfs_alias" "$rustfs_endpoint" "${RUSTFS_ACCESS_KEY:-rustfsadmin}" "${RUSTFS_SECRET_KEY:-rustfsadmin}" --quiet 2>/dev/null || true
+        if mc ls "$rustfs_alias/$rustfs_bucket" >/dev/null 2>&1; then
+          say yellow "  Bucket '${rustfs_bucket}' already exists"
+        else
+          run_quiet "create S3 bucket '${rustfs_bucket}'" mc mb "${rustfs_alias}/${rustfs_bucket}" --quiet
+        fi
+      else
+        say yellow "  mc not found — skipping S3 bucket creation (install minio-client to enable)"
+      fi
+    fi
+  )
+
+  # Summary
+  echo
+  say bold "Worktree ready:"
+  echo "  Path:       ${worktree_dir}"
+  echo "  Branch:     ${branch}"
+  echo "  API port:   ${port} (http://localhost:${port})"
+  echo "  Vite port:  ${vite_port} (http://localhost:${vite_port})"
+  echo "  DB mode:    ${db_mode}"
+  if [ "$db_mode" = "new" ]; then
+    echo "  DB:         ${db_name}"
+    echo "  Redis DB:   ${redis_db}"
+    echo "  S3 bucket:  ${rustfs_bucket}"
+  fi
+  echo
+  say bold "Start it:"
+  echo "  cd ${worktree_dir} && bin/dev"
+  echo
+  if [ "$db_mode" = "shared" ]; then
+    say yellow "Note: Shared database -- migrations run in any worktree affect all."
+    say yellow "Use --db-mode new for branches with schema changes."
+  fi
+}
+
+worktree_update() {
+  local target=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -h|--help) usage; exit 0 ;;
+      --) shift; break ;;
+      -*)  die "Unknown option: $1" ;;
+      *)
+        if [ -z "$target" ]; then
+          target="$1"; shift
+        else
+          die "Unexpected argument: $1"
+        fi
+        ;;
+    esac
+  done
+
+  local worktree_dir db_mode
+  worktree_dir="$(resolve_worktree_path "$target")"
+  db_mode="$(parse_env_value "${worktree_dir}/.env.worktree" "WORKTREE_DB_MODE" 2>/dev/null || true)"
+
+  say cyan "Updating worktree at ${worktree_dir}..."
+  (
+    cd "$worktree_dir"
+
+    # Load worktree env for correct DB connection
+    if [ -f .env.worktree ]; then
+      set -a
+      source .env.worktree
+      set +a
+    fi
+
+    run_quiet "bundle install" bundle install --quiet
+    run_quiet "npm install" bash -c "cd frontend && npm install --silent"
+    run_quiet "database migrate" bin/rails db:migrate
+  )
+  say green "Worktree updated: ${worktree_dir}"
+
+  if [ -n "$db_mode" ]; then
+    echo "  DB mode: ${db_mode}"
+  fi
+}
+
+worktree_list() {
+  local found="false" wt_path="" wt_branch=""
+
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *)
+        wt_path="${line#worktree }"
+        wt_branch=""
+        ;;
+      branch\ *)
+        wt_branch="${line#branch refs/heads/}"
+        if [ "$wt_path" != "$ROOT_DIR" ]; then
+          if [ "$found" = "false" ]; then
+            printf '%-30s %-30s %-6s %-6s %-7s %s\n' "WORKTREE" "BRANCH" "PORT" "VITE" "MODE" "STATUS"
+            found="true"
+          fi
+          local wt_slug wt_port wt_vite wt_mode wt_status wt_rel
+          wt_slug="$(basename "$wt_path")"
+          wt_slug="${wt_slug#${WT_PREFIX}-}"
+          wt_port="$(parse_port_from_env "$wt_path/.env.worktree" 2>/dev/null || true)"
+          wt_vite="$(parse_env_value "$wt_path/.env.worktree" "VITE_PORT" 2>/dev/null || true)"
+          wt_mode="$(parse_env_value "$wt_path/.env.worktree" "WORKTREE_DB_MODE" 2>/dev/null || true)"
+          wt_status="stopped"
+          if [ -n "$wt_port" ] && port_in_use "$wt_port"; then
+            wt_status="running"
+          fi
+          wt_rel="${wt_path#${PARENT_DIR}/}"
+          printf '%-30s %-30s %-6s %-6s %-7s %s\n' "$wt_rel" "${wt_branch:-unknown}" "${wt_port:-?}" "${wt_vite:-?}" "${wt_mode:-shared}" "$wt_status"
+        fi
+        ;;
+    esac
+  done < <(git -C "$ROOT_DIR" worktree list --porcelain)
+
+  if [ "$found" = "false" ]; then
+    echo "No worktrees found."
+    echo "Create one: bin/worktree setup <branch>"
+    exit 0
+  fi
+
+  echo
+  echo "Commands: bin/worktree setup <branch> | bin/worktree update [<slug>] | bin/worktree cleanup <slug> | bin/worktree list"
+}
+
+worktree_cleanup() {
+  local force="false" target=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --force|-f) force="true"; shift ;;
+      -h|--help)  usage; exit 0 ;;
+      --)         shift; break ;;
+      -*)         die "Unknown option: $1" ;;
+      *)
+        if [ -z "$target" ]; then
+          target="$1"; shift
+        else
+          die "Unexpected argument: $1"
+        fi
+        ;;
+    esac
+  done
+
+  # Interactive picker via fzf
+  if [ -z "$target" ]; then
+    if [ -t 0 ] && command -v fzf >/dev/null 2>&1; then
+      local list="" wt_path="" wt_branch=""
+      while IFS= read -r line; do
+        case "$line" in
+          worktree\ *)
+            wt_path="${line#worktree }"
+            wt_branch=""
+            ;;
+          branch\ *)
+            wt_branch="${line#branch refs/heads/}"
+            if [ "$wt_path" != "$ROOT_DIR" ]; then
+              local wt_slug wt_port
+              wt_slug="$(basename "$wt_path")"
+              wt_slug="${wt_slug#${WT_PREFIX}-}"
+              wt_port="$(parse_port_from_env "$wt_path/.env.worktree" 2>/dev/null || echo '?')"
+              list="${list}${wt_slug}\t${wt_branch}\t${wt_port}\n"
+            fi
+            ;;
+        esac
+      done < <(git -C "$ROOT_DIR" worktree list --porcelain)
+
+      if [ -n "$list" ]; then
+        target="$(printf "$list" | fzf \
+          --prompt 'Worktree to cleanup: ' \
+          --delimiter=$'\t' \
+          --with-nth=1,2,3 \
+          --header $'slug\tbranch\tport' \
+          || true)"
+        target="$(printf '%s' "$target" | cut -f1)"
+      fi
+    fi
+    [ -z "$target" ] && { usage; exit 1; }
+  fi
+
+  # Resolve target to worktree path
+  local worktree_dir slug
+  if [ -d "$target" ]; then
+    worktree_dir="$(cd "$target" && pwd -P)"
+    slug="$(basename "$worktree_dir")"
+    slug="${slug#${WT_PREFIX}-}"
+  else
+    slug="$target"
+    worktree_dir="${PARENT_DIR}/${WT_PREFIX}-${slug}"
+  fi
+
+  if [ -z "$slug" ]; then
+    die "Unable to determine worktree slug"
+  fi
+
+  # Refuse to clean up from inside the target
+  local current_dir
+  current_dir="$(pwd -P)"
+  if [ "$current_dir" = "$worktree_dir" ] || [[ "$current_dir" == "$worktree_dir"/* ]]; then
+    die "Cannot clean up worktree while inside it. Run from the main checkout: cd ${ROOT_DIR}"
+  fi
+
+  # Check for running processes
+  local port
+  port="$(parse_port_from_env "$worktree_dir/.env.worktree" 2>/dev/null || true)"
+  if [ -n "$port" ] && port_in_use "$port"; then
+    die "Worktree is still running on port ${port}. Stop it first."
+  fi
+
+  local db_mode db_name redis_db rustfs_bucket
+  db_mode="$(parse_env_value "$worktree_dir/.env.worktree" "WORKTREE_DB_MODE" 2>/dev/null || true)"
+  db_name="$(parse_env_value "$worktree_dir/.env.worktree" "DB_NAME" 2>/dev/null || true)"
+  redis_db="$(parse_redis_db_from_env "$worktree_dir/.env.worktree" 2>/dev/null || true)"
+  rustfs_bucket="$(parse_env_value "$worktree_dir/.env.worktree" "RUSTFS_BUCKET" 2>/dev/null || true)"
+
+  # Safety checks
+  if [ "$force" != "true" ] && [ -d "$worktree_dir" ]; then
+    if [ -n "$(git -C "$worktree_dir" status --porcelain 2>/dev/null)" ]; then
+      die "Worktree has uncommitted changes. Use --force to override."
+    fi
+
+    local branch upstream unpushed
+    branch="$(git -C "$worktree_dir" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+    if [ -z "$branch" ]; then
+      die "Worktree is on a detached HEAD. Use --force to override."
+    fi
+
+    upstream="$(git -C "$worktree_dir" rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)"
+    if [ -n "$upstream" ]; then
+      unpushed="$(git -C "$worktree_dir" rev-list --count "${upstream}..HEAD" 2>/dev/null || echo 0)"
+      if [ "$unpushed" -gt 0 ]; then
+        die "Branch ${branch} has ${unpushed} unpushed commit(s). Push first or use --force."
+      fi
+    elif git -C "$worktree_dir" rev-parse --verify "origin/${branch}" >/dev/null 2>&1; then
+      unpushed="$(git -C "$worktree_dir" rev-list --count "origin/${branch}..HEAD" 2>/dev/null || echo 0)"
+      if [ "$unpushed" -gt 0 ]; then
+        die "Branch ${branch} has ${unpushed} unpushed commit(s). Push first or use --force."
+      fi
+    else
+      die "Branch ${branch} has no remote tracking branch. Push first or use --force."
+    fi
+  fi
+
+  # Teardown isolated resources
+  if [ "$db_mode" = "new" ]; then
+    if [ -n "$db_name" ]; then
+      say cyan "Dropping isolated database '${db_name}'..."
+      PGHOST="${DB_HOST:-localhost}" PGPORT="${DB_PORT:-5452}" PGUSER="${DB_USERNAME:-postgres}" PGPASSWORD="${DB_PASSWORD:-password}" \
+        dropdb --if-exists "$db_name" 2>/dev/null || say yellow "  Could not drop database '${db_name}'"
+    fi
+
+    if [ -n "$redis_db" ]; then
+      say cyan "Flushing Redis DB ${redis_db}..."
+      redis-cli -p 6399 -n "$redis_db" flushdb >/dev/null 2>&1 || say yellow "  Could not flush Redis DB ${redis_db}"
+    fi
+
+    if [ -n "$rustfs_bucket" ] && command -v mc >/dev/null 2>&1; then
+      say cyan "Removing S3 bucket '${rustfs_bucket}'..."
+      local rustfs_alias="dailywerk-local"
+      mc alias set "$rustfs_alias" "${RUSTFS_ENDPOINT:-http://localhost:9002}" "${RUSTFS_ACCESS_KEY:-rustfsadmin}" "${RUSTFS_SECRET_KEY:-rustfsadmin}" --quiet 2>/dev/null || true
+      mc rb --force "${rustfs_alias}/${rustfs_bucket}" --quiet 2>/dev/null || say yellow "  Could not remove bucket '${rustfs_bucket}'"
+    fi
+  fi
+
+  # Remove worktree
+  say cyan "Removing worktree: ${slug}..."
+  if git -C "$ROOT_DIR" worktree list --porcelain | grep -q "^worktree ${worktree_dir}$"; then
+    git -C "$ROOT_DIR" worktree remove "$worktree_dir" --force 2>/dev/null || true
+  elif [ -d "$worktree_dir" ]; then
+    rm -rf "$worktree_dir"
+  fi
+  git -C "$ROOT_DIR" worktree prune
+
+  say green "Worktree cleaned up: ${slug}"
+}
+
+# --- Main dispatch ---
+
+command="${1:-}"
+if [ -z "$command" ]; then
+  worktree_list
+  exit 0
+fi
+
+case "$command" in
+  setup)   shift; worktree_setup "$@" ;;
+  update)  shift; worktree_update "$@" ;;
+  cleanup) shift; worktree_cleanup "$@" ;;
+  list)    shift; worktree_list "$@" ;;
+  -h|--help|help) usage; exit 0 ;;
+  *) die "Unknown command: ${command}. Run 'bin/worktree help' for usage." ;;
+esac

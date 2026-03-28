@@ -16,7 +16,9 @@ module Dailywerk
 
     # Background jobs
     config.active_job.queue_adapter = :good_job
+    config.active_job.queue_name_prefix = ENV.fetch("GOOD_JOB_QUEUE_PREFIX") { "" }
     config.good_job.execution_mode = :external
+    config.good_job.enable_cron = ActiveModel::Type::Boolean.new.cast(ENV.fetch("GOOD_JOB_ENABLE_CRON") { "true" })
 
     # GoodJob dashboard needs these middleware in API-only mode
     config.middleware.use ActionDispatch::Cookies
