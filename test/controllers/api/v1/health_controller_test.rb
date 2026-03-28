@@ -11,10 +11,18 @@ module Api
         assert_response :success
 
         json = JSON.parse(response.body)
+
         assert_equal "ok", json["status"]
-        assert json["timestamp"].present?
-        assert json["version"].present?
-        assert json["ruby"].present?
+      end
+
+      test "returns version info" do
+        get api_v1_health_url
+
+        json = JSON.parse(response.body)
+
+        assert_predicate json["timestamp"], :present?
+        assert_predicate json["version"], :present?
+        assert_predicate json["ruby"], :present?
       end
     end
   end

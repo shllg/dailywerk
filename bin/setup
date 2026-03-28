@@ -4,6 +4,12 @@ set -e
 echo "== Installing Ruby dependencies =="
 bundle check || bundle install
 
+if ! command -v overmind >/dev/null 2>&1; then
+  echo ""
+  echo "== Installing overmind (process manager) =="
+  gem install overmind --no-document
+fi
+
 echo ""
 echo "== Installing frontend dependencies =="
 cd frontend && npm install && cd ..
@@ -11,6 +17,10 @@ cd frontend && npm install && cd ..
 echo ""
 echo "== Starting Docker services =="
 docker compose up -d --wait
+
+echo ""
+echo "== Creating S3 bucket =="
+docker compose --profile setup run --rm rustfs-setup
 
 echo ""
 echo "== Preparing database =="

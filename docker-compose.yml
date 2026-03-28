@@ -58,6 +58,8 @@ services:
       echo 'Bucket dailywerk-dev created'
       "
     restart: "no"
+    profiles:
+      - setup
 
   mailcatcher:
     image: sj26/mailcatcher:latest

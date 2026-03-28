@@ -1,4 +1,11 @@
 inherit_gem: { rubocop-rails-omakase: rubocop.yml }
 
-require:
+plugins:
   - rubocop-minitest
+
+AllCops:
+  NewCops: enable
+  Exclude:
+    - db/migrate/**/*
+    - vendor/**/*
+    - frontend/**/*
