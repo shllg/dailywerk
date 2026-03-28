@@ -1,0 +1,285 @@
+# DailyWerk — Integrations & Channels
+
+> Everything that connects DailyWerk to external systems: messaging, email, calendar, vault sync, tasks, search.
+> For database schema: see [01-platform-and-infrastructure.md §5](./01-platform-and-infrastructure.md#5-canonical-database-schema).
+> For how agents use channels and tools: see [03-agentic-system.md](./03-agentic-system.md).
+> For cost tracking of integration calls: see [04-billing-and-operations.md](./04-billing-and-operations.md).
+
+---
+
+## 1. Messaging Gateway & Bridge Protocol
+
+DailyWerk defines a **universal bridge protocol**. All messenger integrations speak the same webhook-based contract:
+
+```
+── Inbound (bridge → DailyWerk) ──────────────────────────
+POST https://api.dailywerk.com/bridges/{bridge_id}/inbound
+Authorization: Bearer {bridge_api_key}
+{
+  "event": "message",
+  "sender": "+4915112345678",
+  "timestamp": "2026-03-27T10:00:00Z",
+  "content": {
+    "type": "text|image|file|voice",
+    "text": "...",
+    "media_url": "...",
+    "mime_type": "image/jpeg"
+  },
+  "thread_id": "...",
+  "raw": { ... }
+}
+
+── Outbound (DailyWerk → bridge) ─────────────────────────
+POST https://{bridge_host}/send
+Authorization: Bearer {bridge_api_key}
+{
+  "recipient": "+4915112345678",
+  "content": { "type": "text|image|file", "text": "...", "media_url": "...", "mime_type": "..." },
+  "reply_to": "..."
+}
+
+── Health ─────────────────────────────────────────────────
+GET https://{bridge_host}/health
+→ { "status": "ok", "account": "+49...", "uptime": 3600 }
+```
+
+### Channel Types
+
+**In-App Chat** (built-in, WebSocket): Native chat in the DailyWerk dashboard. ActionCable (Rails WebSocket) connects the SPA directly to the agent. No bridge needed — messages go straight to AgentRunner via [03 §9](./03-agentic-system.md#9-streaming-architecture). Primary channel for non-technical users who don't use messengers with the bot.
+
+**Telegram** (built-in bridge): Bot API, webhook mode. User links via `/start` deep link with token. Simplest external integration.
+
+**Telegram encryption note**: Telegram Bot API does **not** support end-to-end encryption. Bot messages use client-server encryption (MTProto) — Telegram servers can technically read them. Secret chats (E2EE) are human-to-human only, not available for bots. This is a fundamental Telegram limitation. Documented clearly for users; recommend Signal for security-sensitive use cases.
+
+**WhatsApp** (built-in bridge, post-MVP): Meta Cloud API. Requires Meta Business Manager, phone number verification, message templates for outbound (24h session window). 4-6 weeks for Meta approval.
+
+**Signal** (external bridge): No official bot API. DailyWerk publishes `dailywerk/signal-bridge` Docker image (open source — no magic, just message routing). Three layers:
+
+*Layer 1 — Self-Hosted (free, technical users)*: User runs Docker image on their infra with DailyWerk API key. User registers dedicated phone number via dashboard.
+
+*Layer 2 — Managed (paid add-on)*: User clicks "Enable Managed Signal" → DailyWerk auto-provisions Hetzner cx22 VPS, deploys bridge image via cloud-init, injects credentials. Billed as ~€5/mo add-on via Stripe (see [04 §1](./04-billing-and-operations.md#1-payments--stripe-integration)). Health monitoring every 60s, auto-restart on failure + alert user.
+
+*Layer 3 — Pooled (future)*: Shared signal-cli infrastructure. Same bridge protocol. Users don't know which layer serves them.
+
+**Critical**: Registering a number with signal-cli deregisters it from the user's phone. Dedicated phone number required (prepaid SIM). Very clear in UX.
+
+---
+
+## 2. Channel Adapter Architecture
+
+The channel adapter layer provides a uniform interface for sending messages across different transports. The [AgentRuntime](./03-agentic-system.md#3-agent-runtime-react-loop) uses adapters to deliver responses without knowing the underlying transport.
+
+```ruby
+# app/services/channel_adapter_registry.rb
+module ChannelAdapterRegistry
+  ADAPTERS = {
+    "web"      => WebChannelAdapter,
+    "telegram" => TelegramChannelAdapter,
+    "api"      => ApiChannelAdapter,
+    "signal"   => SignalChannelAdapter
+  }.freeze
+
+  def self.resolve(channel_type, config = {})
+    ADAPTERS.fetch(channel_type).new(config)
+  end
+end
+
+# app/adapters/base_channel_adapter.rb
+class BaseChannelAdapter
+  def initialize(config); @config = config; end
+  def send_message(session, content) = raise NotImplementedError
+  def send_streaming_chunk(session, chunk) = raise NotImplementedError
+  def format_tool_result(result) = result.to_s
+end
+
+# app/adapters/web_channel_adapter.rb
+class WebChannelAdapter < BaseChannelAdapter
+  def send_streaming_chunk(session, chunk)
+    ActionCable.server.broadcast(
+      "session_#{session.id}",
+      { type: "token", content: chunk.content, agent: chunk.model_id }
+    )
+  end
+end
+
+# app/adapters/telegram_channel_adapter.rb
+class TelegramChannelAdapter < BaseChannelAdapter
+  def send_message(session, content)
+    Telegram::Bot::Client.new(@config["bot_token"]).api.send_message(
+      chat_id: session.channel.external_id,
+      text: content, parse_mode: "Markdown"
+    )
+  end
+end
+```
+
+### Session Resolver
+
+Finds or creates the right session for an inbound message:
+
+```ruby
+# app/services/session_resolver.rb
+class SessionResolver
+  def self.resolve(user:, agent_slug:, channel_type:, external_id: nil)
+    channel = Channel.find_or_create_by!(
+      user: user, channel_type: channel_type, external_id: external_id
+    )
+    agent = Agent.find_by!(slug: agent_slug, user: user, active: true)
+
+    Session.find_or_create_by!(agent: agent, channel: channel, status: "active") do |s|
+      s.user     = user
+      s.model_id = agent.model_id
+      s.provider = agent.provider
+    end
+  end
+end
+```
+
+---
+
+## 3. Email Integration
+
+### Gmail API (primary path)
+
+OAuth 2.0 with separate flow from WorkOS. Full access scopes: `gmail.readonly`, `gmail.send`, `gmail.modify`, `gmail.labels`. Agent can read, send, label, archive, star, and manage emails. Push notifications via Google Pub/Sub. `users.watch()` renewed every 7 days (GoodJob cron — see [04 §8](./04-billing-and-operations.md#8-goodjob-configuration)).
+
+### SMTP/IMAP (alternative path, post-MVP)
+
+For users not on Gmail. Standard IMAP polling for inbox monitoring, SMTP for sending. Credentials stored encrypted (see [01 §5.9](./01-platform-and-infrastructure.md#59-integration-tables)). IMAP IDLE for near-realtime push where supported. Broader provider support (Outlook, ProtonMail Bridge, self-hosted).
+
+**Design note**: `EmailProcessor` worker must be provider-agnostic from the start — abstract over Gmail API vs IMAP/SMTP behind a common interface.
+
+---
+
+## 4. Obsidian Vault Sync
+
+### S3 as Source of Truth, Disk as Working Copy
+
+```
+User's Obsidian App (phone/desktop)
+         │ (Obsidian Sync protocol)
+   Obsidian Cloud
+         │ (obsidian-headless sync --continuous)
+   DailyWerk Server: /data/vaults/{user_id}/   ← local checkout
+         │
+         ├──▶ Agent reads/writes files here
+         ├──▶ EmbeddingWorker indexes changes → pgvector
+         │
+         ▼ (VaultSyncWorker, every 5min + inotify)
+   Hetzner S3: vaults/{user_id}/   ← encrypted canonical store (SSE-C)
+```
+
+**Obsidian Headless** (official CLI, released Feb 2026): Headless client for Obsidian Sync. Requires Node.js 22+. Supports bidirectional sync, pull-only, and mirror-remote modes. Runs continuous sync watching for changes. Enables server-side vault synchronization without the desktop app.
+
+### Consistency Guarantees
+
+1. **S3 always latest**: VaultSyncWorker diffs local→S3 by content hash (every 5min + on inotify file change). One-way mirror. Agents write to local checkout; VaultSyncWorker pushes to S3.
+2. **pgvector always current**: EmbeddingWorker triggered by inotify. Re-chunks and re-embeds changed files. `vault_files.content_hash` skips unchanged files. See [01 §5.6](./01-platform-and-infrastructure.md#56-vault-tables) for schema.
+3. **Correct user on correct server**: MVP single-server = all active users checked out. Scale: Redis checkout lock (`user:{id}:checkout_server = server-3`), request routing to locked server.
+4. **Disk space**: LRU eviction for inactive users (>24h no triggers). S3 retains everything. Re-checkout on next trigger. Max 10GB/user enforced at VaultSyncWorker level. Monitoring + alerts.
+5. **Cold start**: Pull full vault from S3, then start `obsidian-headless sync` on top. MVP: keep all test users warm, monitor, solve later.
+
+### Non-Obsidian Users
+
+Identical mechanism minus `obsidian-headless sync`. DailyWerk-native vault: markdown files in S3, simple read-only viewer in dashboard. Can connect Obsidian later to the same vault directory + start sync (may produce conflicts, user is warned).
+
+### Multi-Vault (future)
+
+Users may have multiple vaults (e.g., personal, work). Additional pricing TBD. Each vault = separate S3 prefix + separate local checkout + separate pgvector partition. Agent `tool_configs` specify which vault(s) they can access (see `vault_access` in [01 §5.3](./01-platform-and-infrastructure.md#53-agent-tables)).
+
+**Obsidian Sync cost**: User's own subscription (~$4/mo). DailyWerk does not pay. Documented as prerequisite for Obsidian users.
+
+---
+
+## 5. Calendar
+
+### Google Calendar API (primary)
+
+OAuth 2.0, separate flow from WorkOS. Bidirectional sync. DailyWerk stores its own calendar entries in PostgreSQL (see [01 §5.7](./01-platform-and-infrastructure.md#57-task--calendar-tables)). User-configurable rules per agent: which Google Calendar to target (personal, work, shared), default duration, reminders, color coding.
+
+### CalDAV Export (read-only, for non-Google users)
+
+DailyWerk exposes a CalDAV-compatible read-only endpoint per user (`https://api.dailywerk.com/caldav/{user_id}/`). Any CalDAV-compatible app (Apple Calendar, Thunderbird, Nextcloud) can subscribe and see DailyWerk-managed events. This is a **read-only feed** — events created in external apps don't sync back. Users get an .ics subscription URL as a simpler alternative.
+
+### CalDAV Write Support (post-MVP)
+
+Full CalDAV server implementation (e.g., via `cervicale` gem or custom Rack middleware). Enables bidirectional sync with any calendar app. Significant effort (RFC 4791). Evaluate when demand exists.
+
+---
+
+## 6. Tasks / Todos
+
+### Internal Agent Tasks (ephemeral)
+
+Scratch work during agentic loops. Live in session context, discarded when session ends. Not persisted to the tasks table.
+
+### User-Facing Tasks (persistent, synced)
+
+Stored in the `tasks` table (see [01 §5.7](./01-platform-and-infrastructure.md#57-task--calendar-tables)). Created by agents, users, or synced from external providers.
+
+### External Sync Conflict Handling
+
+Last-write-wins with conflict detection. On each sync cycle (TodoSyncWorker, GoodJob cron every 2min):
+
+1. Pull changes from external provider since last sync.
+2. Compare `external_updated_at` with local `updated_at`.
+3. If external is newer → update local. If local is newer → push to external. If both changed → external wins (user explicitly edited in their app), log conflict for review.
+4. Same strategy for calendar sync — external user edits take precedence over agent-generated events.
+
+---
+
+## 7. Data Search & Retrieval Layer
+
+### 7.1 Two Search Domains
+
+**Agent memory** (PostgreSQL only): Session history, memory entries, agent notes. Private to agents. Searched via `memory_search` tool (see [03 §6](./03-agentic-system.md#6-tool-system)).
+
+**User data / vault** (S3-backed, pgvector-indexed): Vault files, diary entries, research notes. Owned by user, read/written by agents. Searched via `vault_search` tool.
+
+These are separate search spaces with separate tools. An agent can search both, but the distinction matters for privacy and data lifecycle.
+
+### 7.2 Hybrid Search in PostgreSQL
+
+The `vault_chunks` table (see [01 §5.6](./01-platform-and-infrastructure.md#56-vault-tables)) supports both keyword and semantic search:
+
+- **Keyword**: `ts_rank()` over `tsv tsvector` column (GIN index)
+- **Semantic**: `1 - (embedding <=> query_embedding)` cosine similarity (HNSW index)
+- **Fusion**: Combined via Reciprocal Rank Fusion (RRF) — `score = Σ 1/(k + rank)` with k=60
+
+All queries scoped by `user_id` (RLS).
+
+```ruby
+# Hybrid search combining semantic + keyword via RRF
+def hybrid_search(user, query, limit: 5)
+  embedding = RubyLLM.embed(query).vectors
+
+  semantic = user.vault_chunks
+    .nearest_neighbors(:embedding, embedding, distance: "cosine").limit(limit * 2)
+  fulltext = user.vault_chunks
+    .where("tsv @@ plainto_tsquery('english', ?)", query).limit(limit * 2)
+
+  rrf_scores = Hash.new(0.0)
+  semantic.each_with_index { |chunk, i| rrf_scores[chunk.id] += 1.0 / (60 + i) }
+  fulltext.each_with_index { |chunk, i| rrf_scores[chunk.id] += 1.0 / (60 + i) }
+
+  chunk_ids = rrf_scores.sort_by { |_, s| -s }.first(limit).map(&:first)
+  VaultChunk.where(id: chunk_ids).index_by(&:id).values_at(*chunk_ids).compact
+end
+```
+
+### 7.3 Indexing Pipeline
+
+File change (inotify from local checkout or agent write) → EmbeddingWorker: read → markdown-aware chunk (respect headings, paragraphs, code blocks) → generate tsvector → call OpenAI `text-embedding-3-small` (1536 dims) → upsert `vault_chunks` → track credit cost (see [04 §4](./04-billing-and-operations.md#4-token--cost-tracking)).
+
+### 7.4 Scaling Path
+
+pgvector handles ~1M vectors with HNSW. Per-user vault = <50k chunks typically. At 10k+ users: partition `vault_chunks` by `user_id` → OpenSearch with filtered aliases → dedicated vector DB.
+
+---
+
+## 8. Open Questions
+
+1. **SMTP/IMAP implementation** — Post-MVP but architecture should not preclude it. EmailProcessor worker needs to be provider-agnostic from the start.
+2. **CalDAV write support** — Read-only .ics feed for MVP. Full CalDAV server for bidirectional sync is significant effort (RFC 4791). Evaluate `cervicale` gem or custom Rack middleware when demand exists.
+3. **External sync conflict resolution** — Last-write-wins with external-preference is the MVP strategy. May need user-facing conflict UI for edge cases (agent and user both modified same event simultaneously).
+4. **Webhook idempotency** — Inbound bridge webhooks and Stripe webhooks need idempotency keys to prevent duplicate processing on retries.
