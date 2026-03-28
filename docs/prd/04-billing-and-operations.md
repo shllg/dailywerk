@@ -15,6 +15,8 @@
 - **Free tier**: No Stripe subscription. Internal credit grant. **Manual admin approval** — new users created as `pending` (see `users.status` in [01 §5.2](./01-platform-and-infrastructure.md#52-core-tables)). Admin unlocks before use.
 - **Credit exhaustion**: Chat is **blocked** (not degraded). If overage billing enabled, additional credits charged per-credit.
 - **Webhooks**: Stripe → Rails endpoint → update plan/credit/subscription state. Must use idempotency keys to prevent double-processing.
+- **Webhook authentication**: Every Stripe webhook MUST verify the `Stripe-Signature` header via `Stripe::Webhook.construct_event(payload, sig_header, endpoint_secret)`. Without this, the endpoint is unauthenticated — attackers can forge subscription upgrades.
+- **Idempotency**: Track processed events in a `processed_stripe_events` table with unique constraint on `stripe_event_id`. Prevents replay attacks and double-processing.
 
 ---
 
@@ -75,6 +77,16 @@ Routes by task type, user plan, agent config overrides, provider health. Falls b
 
 1 credit = $0.001. Pre-deduct estimated → reconcile actual async. Free tier: small monthly grant, no rollover. Embedding costs negligible (~$0.02/1M tokens) but tracked.
 
+### Credit Lifecycle: Reserve → Execute → Reconcile
+
+1. **Reserve**: Before each LLM call, estimate cost and atomically reserve credits:
+   `UPDATE credit_balances SET balance = balance - estimated WHERE user_id = ? AND balance >= estimated`
+   If the UPDATE affects 0 rows, the balance is insufficient — reject the request.
+2. **Execute**: Proceed with the LLM call. Usage is recorded in `usage_records`.
+3. **Reconcile**: `CreditReconcilerJob` (every 4 hours) compares reserved vs actual costs. Adjusts balance for over/under-estimates.
+
+For high-concurrency scenarios, use Redis as an in-memory accumulator (`DECRBY user:{id}:balance estimated`) with periodic flush to PostgreSQL. This avoids row-level lock contention on `credit_balances`.
+
 ---
 
 ## 4. Token & Cost Tracking
@@ -92,7 +104,7 @@ class CostCalculator
     output_price = model.metadata.dig("pricing", "output") || 0
     cached_price = model.metadata.dig("pricing", "cached_input") || (input_price * 0.5)
 
-    billable_input = input_tokens - cached_tokens
+    billable_input = [input_tokens - cached_tokens, 0].max
     input_cost  = (billable_input * input_price / 1_000_000.0)
     cached_cost = (cached_tokens * cached_price / 1_000_000.0)
     output_cost = (output_tokens * output_price / 1_000_000.0)
@@ -109,6 +121,16 @@ class CostCalculator
   end
 end
 ```
+
+### Dual Cost Tracking
+
+DailyWerk tracks costs via two mechanisms:
+
+1. **Token-based tracking** — For LLM calls: input/output/cached tokens × per-model pricing from the provider registry. Recorded in `usage_records` with `request_type: "chat"`.
+
+2. **API/usage-based tracking** — For non-token services: web search (per-query, e.g., Brave at $0.005/query), embedding calls (per-call), MCP tool invocations, bridge operations. Recorded in `usage_records` with appropriate `request_type` values (`"search"`, `"embedding"`, `"mcp"`, `"bridge"`).
+
+Both feed into the unified credit system. The `usage_records.request_type` field discriminates between tracking types. The provider registry defines pricing for both token-based and per-call services.
 
 ### Usage Recorder
 
@@ -190,20 +212,19 @@ end
 class BudgetEnforcer
   class BudgetExceededError < StandardError; end
 
-  def self.check!(user:)
-    balance = user.credit_balance&.balance || 0
-    return if balance > 0
-
-    # Check if user has overage billing enabled
-    return if user.settings.dig("billing", "overage_enabled")
+  def self.check_and_reserve!(user:, estimated_credits:)
+    # Atomic reserve — prevents TOCTOU race
+    rows = CreditBalance.where(user: user)
+      .where("balance >= ?", estimated_credits)
+      .update_all("balance = balance - #{estimated_credits.to_i}")
 
     raise BudgetExceededError,
-      "Credit balance exhausted. Add credits or enable overage billing."
+      "Credit balance exhausted. Add credits or enable overage billing." if rows == 0
   end
 end
 ```
 
-Budget check is called at the start of every [AgentRuntime.run](./03-agentic-system.md#3-agent-runtime-react-loop) invocation, before any LLM calls.
+The old `check!` method (read-only balance check) is replaced by `check_and_reserve!` which atomically reserves credits before the LLM call. Called at the start of every [AgentRuntime.run](./03-agentic-system.md#3-agent-runtime-react-loop) invocation, before any LLM calls.
 
 ---
 
@@ -276,8 +297,22 @@ end
 ```ruby
 # app/controllers/api/v1/api_credentials_controller.rb
 class Api::V1::ApiCredentialsController < ApplicationController
+  ALLOWED_API_BASES = %w[
+    https://api.openai.com
+    https://api.anthropic.com
+    https://openrouter.ai/api
+  ].freeze
+
   def create
     cred = current_user.api_credentials.build(credential_params)
+
+    # SSRF protection: validate api_base against allowlist
+    if cred.api_base.present?
+      unless ALLOWED_API_BASES.any? { |base| cred.api_base.start_with?(base) }
+        return render json: { error: "Custom API base not allowed. Contact admin." },
+                      status: :unprocessable_entity
+      end
+    end
 
     # Validate the key actually works
     ctx = RubyLLM.context do |c|
@@ -303,6 +338,8 @@ class Api::V1::ApiCredentialsController < ApplicationController
 end
 ```
 
+Custom `api_base` URLs (Azure, self-hosted) require admin approval — not user-settable via this endpoint. This prevents SSRF attacks where an attacker probes internal infrastructure via the key validation HTTP call.
+
 ---
 
 ## 7. MCP Support — User Configurable
@@ -312,6 +349,14 @@ end
 For the `mcp_server_configs` schema, see [01 §5.9](./01-platform-and-infrastructure.md#59-integration-tables).
 
 **Note on gem maturity**: `ruby_llm-mcp` is at v0.0.2 as of March 2026. The API surface may differ from the examples below. Verify compatibility before implementation.
+
+```ruby
+# User-configurable MCP servers: only remote transports allowed
+validates :transport_type, inclusion: { in: %w[streamable sse] },
+  message: "stdio transport is admin-only (security: prevents arbitrary command execution)"
+```
+
+**Security**: MCP `stdio` transport executes arbitrary commands on the server. It is restricted to admin-configured system integrations only. User-configurable MCP servers must use `streamable` or `sse` (HTTP-based) transports.
 
 ### MCP Client Manager
 
@@ -333,10 +378,20 @@ class McpClientManager
     end
   end
 
-  def self.tools_for(user:)
-    clients_for(user: user).flat_map do |client|
+  def self.tools_for(user:, agent: nil)
+    configs = McpServerConfig.where(user: user, active: true)
+
+    # Per-agent MCP access control
+    if agent&.enabled_mcps.present?
+      configs = configs.where(id: agent.enabled_mcps.keys)
+    elsif agent
+      return []  # Agent has no enabled MCPs — no MCP access
+    end
+
+    configs.flat_map do |config|
+      cache_key = "#{config.id}:#{config.updated_at.to_i}"
+      client = CLIENTS.compute_if_absent(cache_key) { build_client(config) }
       tools = client.tools
-      config = client.instance_variable_get(:@_config)
 
       # Apply allow/block lists
       if config.allowed_tools.any?
@@ -384,14 +439,21 @@ class Mcp::OauthController < ApplicationController
   def initiate
     config = current_user.mcp_server_configs.find(params[:id])
     client = McpClientManager.build_client(config)
+    state = SecureRandom.urlsafe_base64(32)
+    session[:mcp_oauth_state] = state
 
     redirect_url = client.oauth(type: :web).authorization_url(
-      redirect_uri: mcp_oauth_callback_url(config_id: config.id)
+      redirect_uri: mcp_oauth_callback_url(config_id: config.id),
+      state: state
     )
     redirect_to redirect_url, allow_other_host: true
   end
 
   def callback
+    unless params[:state] == session.delete(:mcp_oauth_state)
+      return redirect_to settings_integrations_path, alert: "OAuth CSRF detected"
+    end
+
     config = current_user.mcp_server_configs.find(params[:config_id])
     client = McpClientManager.build_client(config)
 
@@ -409,6 +471,8 @@ end
 ```
 
 MCP tools returned by `ruby_llm-mcp` are `RubyLLM::Tool`-compatible — they plug directly into the [AgentRuntime](./03-agentic-system.md#3-agent-runtime-react-loop) tool resolution.
+
+**Note for future RFC**: MCP security needs deeper treatment — sandboxing, transport security, tool-level authorization, and abuse prevention require a dedicated security-focused RFC.
 
 ---
 
@@ -457,7 +521,7 @@ Rails.application.configure do
       description: "Review Tier 1 entries — deduplicate, prune stale facts"
     },
     prune_archived_messages: {
-      cron: "0 2 * * 1",              # Weekly Monday 2am
+      cron: "30 2 * * 1",             # Weekly Monday 2:30am — staggered from weekly_memory_consolidation (2:00am) to avoid resource contention
       class: "PruneArchivedMessagesJob",
       description: "Delete messages from archived sessions >30d old"
     },
@@ -496,6 +560,13 @@ Rails.application.configure do
   config.good_job.enable_listen_notify = true  # Low-latency via LISTEN/NOTIFY
 end
 ```
+
+### Background LLM Policy
+
+System operations (compaction, memory extraction, summarization) always use **DailyWerk platform API keys**, not user BYOK keys. Rationale:
+- BYOK keys are for user-facing agent interactions only
+- System ops run asynchronously and must not depend on user-provided credentials being valid
+- System-op costs are platform overhead, attributed to operational cost, not user credits
 
 ### Concurrency Controls
 
@@ -564,7 +635,7 @@ gem "falcon", "~> 0.48"
 
 # LLM
 gem "ruby_llm", "~> 1.14"
-gem "ruby_llm-mcp"                    # MCP support (check latest version — v0.0.2 as of March 2026)
+gem "ruby_llm-mcp", "~> 1.0"          # v0.0.2 was pre-alpha; pin to stable release
 gem "ruby_llm-responses_api", "~> 0.5"
 
 # Background jobs
@@ -596,3 +667,5 @@ gem "strong_migrations", "~> 2.0"
 2. **Error handling / retry strategy** — LLM call failures, provider timeout, rate limit responses. GoodJob supports `retry_on` with backoff. Implement provider failover in LLM router. Handle partial streaming failures (if streaming fails at 80%, partial content may be lost).
 3. **MCP client cross-process invalidation** — `Concurrent::Map` cache is process-scoped. Need Redis pub/sub for cross-process invalidation under Falcon multi-process.
 4. **ReAct loop JSON failures** — When LLM outputs invalid tool JSON, need retry mechanism (feed parse error back to LLM, cap retries at 3).
+5. **Dual cost tracking schema** — Decide whether to extend `usage_records` with `request_type` discrimination or create a separate `api_usage_records` table for non-token costs.
+6. **Credit reservation Redis vs Postgres** — Evaluate whether Redis DECRBY is needed for concurrency, or if Postgres atomic UPDATE is sufficient for MVP scale.

@@ -43,6 +43,17 @@ GET https://{bridge_host}/health
 → { "status": "ok", "account": "+49...", "uptime": 3600 }
 ```
 
+### Webhook Security
+
+**Inbound webhook authentication** uses Bearer tokens. For managed bridges, add HMAC signature verification:
+
+- Bridge signs each payload with Ed25519 using a keypair generated during provisioning
+- DailyWerk verifies the signature using the bridge's public key
+- Timestamp-based replay protection: reject payloads older than 5 minutes
+- Source IP validation for managed bridges (known Hetzner VPS IPs)
+
+**Note**: Bearer-token-only auth is acceptable for MVP self-hosted bridges. Managed bridges must use signature verification before GA.
+
 ### Channel Types
 
 **In-App Chat** (built-in, WebSocket): Native chat in the DailyWerk dashboard. ActionCable (Rails WebSocket) connects the SPA directly to the agent. No bridge needed — messages go straight to AgentRunner via [03 §9](./03-agentic-system.md#9-streaming-architecture). Primary channel for non-technical users who don't use messengers with the bot.
@@ -120,13 +131,15 @@ Finds or creates the right session for an inbound message:
 ```ruby
 # app/services/session_resolver.rb
 class SessionResolver
-  def self.resolve(user:, agent_slug:, channel_type:, external_id: nil)
-    channel = Channel.find_or_create_by!(
+  def self.resolve(user:, agent_slug:, channel_type:, external_id: nil, thread_id: nil)
+    channel = Channel.create_or_find_by!(
       user: user, channel_type: channel_type, external_id: external_id
     )
     agent = Agent.find_by!(slug: agent_slug, user: user, active: true)
 
-    Session.find_or_create_by!(agent: agent, channel: channel, status: "active") do |s|
+    Session.create_or_find_by!(
+      agent: agent, channel: channel, status: "active", thread_id: thread_id
+    ) do |s|
       s.user     = user
       s.model_id = agent.model_id
       s.provider = agent.provider
@@ -134,6 +147,8 @@ class SessionResolver
   end
 end
 ```
+
+`create_or_find_by!` handles concurrent request races (INSERT-first, rescue-to-SELECT). `thread_id` enables per-thread session isolation for group chats.
 
 ---
 
@@ -199,7 +214,9 @@ OAuth 2.0, separate flow from WorkOS. Bidirectional sync. DailyWerk stores its o
 
 ### CalDAV Export (read-only, for non-Google users)
 
-DailyWerk exposes a CalDAV-compatible read-only endpoint per user (`https://api.dailywerk.com/caldav/{user_id}/`). Any CalDAV-compatible app (Apple Calendar, Thunderbird, Nextcloud) can subscribe and see DailyWerk-managed events. This is a **read-only feed** — events created in external apps don't sync back. Users get an .ics subscription URL as a simpler alternative.
+DailyWerk exposes a CalDAV-compatible read-only endpoint per user (`https://api.dailywerk.com/caldav/{caldav_token}/`). Any CalDAV-compatible app (Apple Calendar, Thunderbird, Nextcloud) can subscribe and see DailyWerk-managed events. This is a **read-only feed** — events created in external apps don't sync back. Users get an .ics subscription URL as a simpler alternative.
+
+Uses an opaque, per-user CalDAV token (not user_id) to prevent IDOR. Token is regeneratable by the user via dashboard.
 
 ### CalDAV Write Support (post-MVP)
 
@@ -282,4 +299,4 @@ pgvector handles ~1M vectors with HNSW. Per-user vault = <50k chunks typically. 
 1. **SMTP/IMAP implementation** — Post-MVP but architecture should not preclude it. EmailProcessor worker needs to be provider-agnostic from the start.
 2. **CalDAV write support** — Read-only .ics feed for MVP. Full CalDAV server for bidirectional sync is significant effort (RFC 4791). Evaluate `cervicale` gem or custom Rack middleware when demand exists.
 3. **External sync conflict resolution** — Last-write-wins with external-preference is the MVP strategy. May need user-facing conflict UI for edge cases (agent and user both modified same event simultaneously).
-4. **Webhook idempotency** — Inbound bridge webhooks and Stripe webhooks need idempotency keys to prevent duplicate processing on retries.
+4. **Webhook idempotency** — Inbound bridge webhooks need idempotency keys (message dedup by `event_id` or content hash). Stripe webhooks need `processed_stripe_events` table — see [04 §1](./04-billing-and-operations.md#1-payments--stripe-integration).

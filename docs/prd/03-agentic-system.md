@@ -45,6 +45,16 @@ Per-agent memory scoping (see [§7](#7-memory-architecture) for full memory arch
 - `isolated`: Agent has its own long-term memory. For diary agent, confidential agent.
 - `read_shared`: Agent can read shared memory but writes to its own. For research agent that consumes context but doesn't pollute shared memory.
 
+### Memory Isolation — Read/Write Matrix
+
+| Mode | Reads | Writes (agent_id) |
+|------|-------|--------------------|
+| `shared` | Shared pool (agent_id: nil) + own (agent_id: self) | Shared pool (agent_id: nil) |
+| `isolated` | Own only (agent_id: self) | Own only (agent_id: self) |
+| `read_shared` | Shared pool (agent_id: nil) + own (agent_id: self) | Own only (agent_id: self) |
+
+**Note**: `read_shared` does NOT read other agents' isolated memories — only the shared pool + its own.
+
 ### Resolved Instructions
 
 The system prompt is composed from multiple agent fields:
@@ -195,6 +205,12 @@ class AgentRuntime
   private
 
   def build_chat
+    # Session messages are auto-loaded by ruby_llm's acts_as_chat persistence.
+    # build_chat connects to the session's persisted message history — prior
+    # messages are included in the LLM context automatically. Manual message
+    # injection via MemoryRetrievalService is only needed for memories, archives,
+    # daily logs, and user profile (cross-session context).
+
     # BYOK: build isolated LLM context with user's API keys
     ctx = LlmContextBuilder.build(user: @user)
 
@@ -244,7 +260,8 @@ class AgentRuntime
     local_tools = ToolRegistry.build(@agent.tool_names, user: @user, session: @session)
 
     # MCP tools (user-configured external)
-    mcp_tools = McpClientManager.tools_for(user: @user)
+    # Filtered by agent.enabled_mcps — see McpClientManager
+    mcp_tools = McpClientManager.tools_for(user: @user, agent: @agent)
 
     # Handoff tool (if agent has targets and depth allows)
     routing_tools = if @agent.handoff_targets.any? && @handoff_depth < MAX_HANDOFF_DEPTH
@@ -276,6 +293,12 @@ class AgentRuntime
     if context[:user_profile].present?
       @chat.add_message(role: :system, content: "## User Profile\n#{context[:user_profile]}")
     end
+
+    # Inject daily logs (today + yesterday)
+    if context[:daily_logs].any?
+      log_block = context[:daily_logs].map { |l| "### #{l.date}\n#{l.content}" }.join("\n")
+      @chat.add_message(role: :system, content: "## Daily Logs\n#{log_block}")
+    end
   end
 
   def compact_if_needed!
@@ -290,11 +313,10 @@ class AgentRuntime
     # Extract memories asynchronously
     MemoryExtractionJob.perform_later(@session.id, response.content, user_id: @user.id)
 
-    # Update session token counts
-    @session.update!(
-      total_tokens: @session.total_tokens +
-        response.input_tokens.to_i + response.output_tokens.to_i,
-      last_activity_at: Time.current
+    # Update session token counts (atomic to avoid race conditions)
+    delta = response.input_tokens.to_i + response.output_tokens.to_i
+    Session.where(id: @session.id).update_all(
+      "total_tokens = total_tokens + #{delta}, last_activity_at = '#{Time.current.iso8601}'"
     )
   end
 end
@@ -534,7 +556,7 @@ class MemoryTool < RubyLLM::Tool
         content: params[:content],
         category: params[:category] || "general",
         importance: params[:importance] || 5,
-        agent: @session.agent,
+        agent: agent_for_store,
         session: @session,
         source: "agent"
       )
@@ -565,6 +587,14 @@ class MemoryTool < RubyLLM::Tool
 
   private
 
+  def agent_for_store
+    case @session.agent.memory_isolation
+    when "shared"      then nil            # Write to shared pool
+    when "isolated"    then @session.agent  # Write to own
+    when "read_shared" then @session.agent  # Write to own
+    end
+  end
+
   # Respect memory isolation modes
   def scoped_memories
     case @session.agent.memory_isolation
@@ -573,7 +603,7 @@ class MemoryTool < RubyLLM::Tool
     when "isolated"
       @user.memory_entries.where(agent: @session.agent)
     when "read_shared"
-      @user.memory_entries  # Can read all
+      @user.memory_entries.where(agent_id: [nil, @session.agent_id])  # Shared + own only
     end
   end
 end
@@ -643,7 +673,10 @@ class VaultTool < RubyLLM::Tool
   end
 
   def local_path(vault, path)
-    File.join("/data/vaults", @user.id, vault.slug, path)
+    base = File.expand_path(File.join("/data/vaults", @user.id, vault.slug))
+    full = File.expand_path(path, base)
+    raise ArgumentError, "Path traversal detected" unless full.start_with?(base + File::SEPARATOR)
+    full
   end
 
   def hybrid_search(vault, query)
@@ -741,11 +774,12 @@ Manages token budgets for context injection:
 # app/services/memory_retrieval_service.rb
 class MemoryRetrievalService
   TOKEN_BUDGET = {
-    system_instructions: 0.12,   # 12% of context window
-    memories:            0.10,   # 10%
-    vault_context:       0.15,   # 15%
-    conversation_history: 0.38,  # 38%
-    response_reserve:    0.25    # 25%
+    system_instructions: 0.15,   # 15% of context window
+    memories:            0.12,   # 12%
+    vault_context:       0.18,   # 18%
+    daily_logs:          0.05,   # 5%
+    response_reserve:    0.25,   # 25%
+    # Remaining ~25% is managed by ruby_llm for conversation history
   }.freeze
 
   def initialize(session:, user:)
@@ -762,8 +796,7 @@ class MemoryRetrievalService
       memories: fetch_memories(budget[:memories]),
       archives: fetch_relevant_archives(budget[:vault_context]),
       user_profile: @user.synthesized_profile&.truncate(budget[:memories] * 4),
-      daily_logs: fetch_daily_logs,
-      messages: fetch_windowed_messages(budget[:conversation_history])
+      daily_logs: fetch_daily_logs
     }
   end
 
@@ -793,7 +826,7 @@ class MemoryRetrievalService
     when "isolated"
       @user.memory_entries.where(agent: @agent)
     when "read_shared"
-      @user.memory_entries
+      @user.memory_entries.where(agent_id: [nil, @agent.id])  # Shared + own only
     end
   end
 
@@ -809,29 +842,6 @@ class MemoryRetrievalService
             .order(:date)
   end
 
-  def fetch_windowed_messages(token_budget)
-    messages = @session.messages.where(compacted: false).order(:created_at).to_a
-    return messages if estimated_tokens(messages) <= token_budget
-
-    kept = []
-    remaining = token_budget
-    messages.reverse_each do |msg|
-      est = (msg.content.to_s.length / 4.0).ceil + 4
-      break if remaining - est < 0
-      kept.unshift(msg)
-      remaining -= est
-    end
-
-    if @session.summary.present?
-      kept.unshift(Message.new(role: "system", content: "[Conversation summary]: #{@session.summary}"))
-    end
-
-    kept
-  end
-
-  def estimated_tokens(messages)
-    messages.sum { |m| (m.content.to_s.length / 4.0).ceil + 4 }
-  end
 end
 ```
 
@@ -858,7 +868,8 @@ Triggers at 75% context window usage. Summarizes old messages to keep conversati
 ```ruby
 # app/services/compaction_service.rb
 class CompactionService
-  SUMMARY_MODEL = "gpt-4o-mini"
+  # Configurable — BYOK users without OpenAI key need an alternative
+  SUMMARY_MODEL = Rails.application.config.x.compaction_model || "gpt-4o-mini"
   PRESERVE_RECENT = 10
   PROTECTED_PATTERNS = [
     /```[\s\S]+?```/,              # Code blocks
@@ -940,14 +951,14 @@ config.action_cable.url = ENV["REDIS_URL"]
 # app/channels/session_channel.rb
 class SessionChannel < ApplicationCable::Channel
   def subscribed
-    session = Session.find(params[:session_id])
-    reject unless session.user_id == current_user.id
-    stream_from "session_#{session.id}"
+    @session = current_user.sessions.find(params[:session_id])
+    stream_from "session_#{@session.id}"
+  rescue ActiveRecord::RecordNotFound
+    reject
   end
 
   def receive(data)
-    session = Session.find(params[:session_id])
-    ChatStreamJob.perform_later(session.id, current_user.id, data["message"])
+    ChatStreamJob.perform_later(@session.id, current_user.id, data["message"])
   end
 end
 ```
@@ -1029,6 +1040,8 @@ Embeddings are generated asynchronously to avoid blocking the request cycle. See
 
 Automatically extracts memorable facts from conversations:
 
+**Performance note**: In production, memory extraction should be batched — triggered on session idle (5min of inactivity) or every N messages, not per-response. The per-response pattern shown here is illustrative.
+
 ```ruby
 # app/jobs/memory_extraction_job.rb
 class MemoryExtractionJob < ApplicationJob
@@ -1072,14 +1085,15 @@ class MemoryExtractionJob < ApplicationJob
       existing = session.user.memory_entries.active
         .nearest_neighbors(:embedding, embedding, distance: "cosine")
         .first
-      next if existing && existing.neighbor_distance < 0.1
+      # Threshold requires empirical validation — 0.20 is a conservative starting point
+      next if existing && existing.neighbor_distance < 0.20
 
       session.user.memory_entries.create!(
         content: mem["content"],
         category: mem["category"],
         importance: mem["importance"],
         session: session,
-        agent: session.agent,
+        agent: (session.agent.memory_isolation == "shared" ? nil : session.agent),
         source: "agent"
       )
     end
@@ -1096,7 +1110,7 @@ Request arrives (Web ActionCable / Telegram webhook / API POST)
   │
   ▼
 UserRlsMiddleware
-  │ SET LOCAL app.current_user_id = '...'
+  │ SET app.current_user_id = '...'
   │ (all subsequent queries are RLS-filtered)
   ▼
 SessionResolver.resolve(user:, agent_slug:, channel:)
@@ -1175,3 +1189,4 @@ AgentRuntime.new(session:, user:)
 2. **Compaction concurrency** — Advisory lock prevents concurrent compaction on same session, but rapid back-and-forth near the threshold needs testing.
 3. **Provider failover** — LLM router should fall back to OpenRouter when primary provider fails. Not yet implemented in AgentRuntime.
 4. **Handoff cycle detection** — Currently relies on `handoff_targets` not containing cycles. Should validate acyclicity at agent save time (topological sort or DFS).
+5. **Session continuity verification** — Verify that ruby_llm's `acts_as_chat` auto-loads persisted messages into the chat context. If not, explicit message injection is needed.

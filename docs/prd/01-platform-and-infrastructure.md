@@ -110,7 +110,7 @@ DailyWerk is user-centric: each user owns their data. Isolation is enforced at e
 
 RLS enforces data boundaries at the database level. Even if application code has a bug that omits a `WHERE user_id = ?`, the database silently filters rows.
 
-The pattern uses PostgreSQL session variables (`SET LOCAL app.current_user_id`), which are transaction-scoped. A Rails middleware sets the variable on every request. Background jobs set it before execution.
+The pattern uses PostgreSQL session variables (`SET app.current_user_id`). A Rails middleware sets the variable on every request; an `ensure RESET` block clears it. Background jobs use a `UserScopedJob` concern.
 
 ```ruby
 # db/migrate/xxx_setup_rls.rb
@@ -147,12 +147,16 @@ class SetupRls < ActiveRecord::Migration[8.0]
 
   USER_SCOPED_TABLES = %w[
     agents sessions channels messages tool_calls
-    memory_entries daily_logs notes vault_documents vault_links
+    memory_entries daily_logs notes
     conversation_archives api_credentials mcp_server_configs
-    usage_records tasks calendar_events integrations
-    bridges bridge_events vaults vault_files vault_chunks
+    usage_records usage_daily_summaries tasks calendar_events integrations
+    bridges vaults vault_files vault_chunks
     credit_balances credit_transactions
   ].freeze
+  # NOTE: messages, tool_calls, and conversation_archives need user_id
+  # added (denormalized) — see schema §5.4–5.5 below.
+  # vault_links and bridge_events lack user_id; access controlled via
+  # JOINs to parent tables (vault_files, bridges).
 end
 ```
 
@@ -181,8 +185,11 @@ class UserRlsMiddleware
   end
 
   def set_rls_context(user_id)
+    # Session-level SET persists on the connection until RESET.
+    # This is safer than SET LOCAL under Falcon's fiber model because
+    # SET LOCAL requires an explicit transaction wrapper.
     ActiveRecord::Base.connection.execute(
-      "SET LOCAL app.current_user_id = #{ActiveRecord::Base.connection.quote(user_id)}"
+      "SET app.current_user_id = #{ActiveRecord::Base.connection.quote(user_id)}"
     )
     yield
   ensure
@@ -192,23 +199,49 @@ end
 ```
 
 ```ruby
-# app/jobs/application_job.rb — RLS in background jobs
-class ApplicationJob < ActiveJob::Base
-  around_perform do |job, block|
-    user_id = job.arguments.first.try(:[], :user_id) ||
-              job.user_id_from_record
-
-    if user_id
-      ActiveRecord::Base.connection.execute(
-        "SET LOCAL app.current_user_id = #{ActiveRecord::Base.connection.quote(user_id)}"
-      )
-    end
-    block.call
-  ensure
-    ActiveRecord::Base.connection.execute("RESET app.current_user_id") if user_id
+# config/initializers/rls_safety.rb — Defense-in-depth: reset RLS on connection return
+ActiveSupport.on_load(:active_record) do
+  ActiveRecord::ConnectionAdapters::AbstractAdapter.set_callback :checkin, :before do
+    raw_connection.exec("RESET app.current_user_id") rescue nil
   end
 end
 ```
+
+> **Invariant**: Never perform non-DB I/O (HTTP calls, LLM streaming, file reads) inside a database transaction. Transactions hold connections; under Falcon's fiber concurrency, long-held connections exhaust the pool.
+
+```ruby
+# app/jobs/concerns/user_scoped_job.rb
+module UserScopedJob
+  extend ActiveSupport::Concern
+
+  included do
+    around_perform :set_rls_context
+  end
+
+  private
+
+  def set_rls_context
+    uid = self.class.extract_user_id(arguments)
+    raise ArgumentError, "#{self.class.name} requires user_id: keyword arg" unless uid
+
+    ActiveRecord::Base.connection.execute(
+      "SET app.current_user_id = #{ActiveRecord::Base.connection.quote(uid)}"
+    )
+    yield
+  ensure
+    ActiveRecord::Base.connection.execute("RESET app.current_user_id") if uid
+  end
+
+  class_methods do
+    def extract_user_id(args)
+      # Convention: all user-scoped jobs pass user_id: as keyword arg
+      args.last.try(:[], :user_id) if args.last.is_a?(Hash)
+    end
+  end
+end
+```
+
+All jobs touching user data must `include UserScopedJob` and pass `user_id:` as keyword argument.
 
 ```yaml
 # config/database.yml
@@ -227,6 +260,8 @@ production:
 ### 4.3 Vault Storage Security (SSE-C)
 
 On user creation, generate unique AES-256 key → stored encrypted in PG (Rails credentials / KMS). Every S3 PUT/GET includes SSE-C headers with user's key. Hetzner encrypts, then discards key. Cross-user read impossible even if bucket compromised.
+
+**Future**: Envelope encryption with external KMS (e.g., Hashicorp Vault). The Rails master key encrypts a per-user DEK, but the DEK itself should be wrapped by a KMS-managed key. Database compromise alone should be insufficient to access vault data.
 
 ### 4.4 Future: Shared Resources
 
@@ -402,6 +437,7 @@ class CreateSessionTables < ActiveRecord::Migration[8.0]
     # Messages — rich token tracking, importance scoring, thinking support
     create_table :messages, id: :uuid do |t|
       t.references :session, type: :uuid, null: false, foreign_key: true
+      t.references :user, type: :uuid, null: false, foreign_key: true  # Denormalized for RLS — also available via session.user_id
       t.string   :role,      null: false   # user, assistant, system, tool
       t.text     :content
       t.text     :content_raw               # Provider-specific Content::Raw
@@ -430,6 +466,7 @@ class CreateSessionTables < ActiveRecord::Migration[8.0]
     # Tool calls — separate table for structured tool execution tracking
     create_table :tool_calls, id: :uuid do |t|
       t.references :message, type: :uuid, null: false, foreign_key: true
+      t.references :user, type: :uuid, null: false, foreign_key: true  # Denormalized for RLS — also available via session.user_id
       t.string   :tool_call_id
       t.string   :name
       t.jsonb    :arguments,   default: {}
@@ -501,6 +538,7 @@ class CreateMemoryTables < ActiveRecord::Migration[8.0]
     # Conversation archives — cold storage summaries with semantic search
     create_table :conversation_archives, id: :uuid do |t|
       t.references :session, type: :uuid, null: false, foreign_key: true
+      t.references :user, type: :uuid, null: false, foreign_key: true  # Denormalized for RLS — also available via session.user_id
       t.text     :summary
       t.jsonb    :key_facts,     default: []
       t.integer  :message_count
@@ -649,7 +687,8 @@ class CreateBillingTables < ActiveRecord::Migration[8.0]
     create_table :credit_transactions, id: :uuid do |t|
       t.references :user, type: :uuid, null: false, foreign_key: true
       t.bigint   :amount,      null: false  # Positive = credit, negative = debit
-      t.string   :type,        null: false  # grant, purchase, usage, refund, expiry
+      t.string   :transaction_type, null: false  # Avoids Rails STI conflict with reserved 'type' column
+      # transaction_type values: grant, purchase, usage, refund, expiry
       t.string   :provider
       t.string   :model
       t.integer  :tokens_in
@@ -700,7 +739,7 @@ class CreateBillingTables < ActiveRecord::Migration[8.0]
       t.decimal  :total_cost, precision: 12, scale: 6, default: 0
       t.timestamps
 
-      t.index [:user_id, :date, :model_id], unique: true, name: "idx_usage_daily_unique"
+      t.index [:user_id, :date, :model_id, :provider], unique: true, name: "idx_usage_daily_unique"
     end
   end
 end
@@ -743,7 +782,7 @@ class CreateIntegrationTables < ActiveRecord::Migration[8.0]
     create_table :mcp_server_configs, id: :uuid do |t|
       t.references :user, type: :uuid, null: false, foreign_key: true
       t.string   :name,            null: false
-      t.string   :transport_type,  null: false, default: "streamable"  # streamable, sse, stdio
+      t.string   :transport_type,  null: false, default: "streamable"  # streamable, sse (user); stdio (admin-only)
       t.string   :url                          # For streamable/sse
       t.jsonb    :stdio_config,    default: {} # { command:, args:, env: }
       t.jsonb    :oauth_config,    default: {} # { scope:, client_id:, ... }
@@ -830,6 +869,9 @@ Docker Compose for MVP. Single server for first 10 test users (keep all vaults w
 - API keys and credentials encrypted via Rails 8 `ActiveRecord::Encryption` (non-deterministic).
 - `instructions_path` in agents table: validated against allowlist of known prompt templates. Not user-settable via API — admin-only field.
 - `GenerateEmbeddingJob` uses allowlisted model names: `EMBEDDABLE_MODELS = %w[MemoryEntry Note VaultChunk ConversationArchive]`. No raw `constantize`.
+- **RLS safety**: Session-level `SET` with connection-pool checkin hooks. Architectural invariant: no non-DB I/O inside transactions.
+- **Path traversal**: All file path construction from user/agent input must be canonicalized and prefix-checked against the expected base directory.
+- **SSRF protection**: User-provided URLs (BYOK `api_base`, webhook URLs) validated against allowlists. HTTPS-only. Custom endpoints require admin approval.
 
 ---
 
@@ -841,3 +883,8 @@ Docker Compose for MVP. Single server for first 10 test users (keep all vaults w
 4. **Frontend architecture** — Vite + React + TypeScript + Tailwind + DaisyUI chosen. Component structure, state management, and API contract details TBD.
 5. **Observability** — Logging, metrics, alerting, health checks, session replay for debugging. Needs dedicated design.
 6. **GDPR / data deletion** — Define `UserDeletionService` for hard-delete of all user data across PG, S3, Redis, and vault checkouts.
+7. **SPA authentication** — React SPA and Rails API must share a root domain for HttpOnly/Secure/SameSite cookie-based auth. JWT in localStorage is an XSS vector.
+8. **Connection pooling** — Falcon at scale needs PgBouncer. Transaction-mode PgBouncer conflicts with session-level SET. Evaluate statement-level pooling or connection pinning strategies.
+9. **Observability** — Logging, metrics, alerting, health checks, session replay for debugging. Needs dedicated design.
+10. **GDPR / data deletion** — `UserDeletionService` for hard-delete of all user data across PG, S3, Redis, and vault checkouts.
+11. **Rate limiting** — Per-user request rate (requests/minute) in Redis. Per-provider rate limiting to respect API quotas.
