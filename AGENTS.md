@@ -8,6 +8,7 @@
 4. Strong parameters: explicit `permit` allowlists on every controller action.
 5. Package managers: `bundler` (backend), `pnpm` (frontend). Never yarn/npm.
 6. Git safety: never auto-commit or push.
+7. YARD docs: add concise YARD comments to new or changed Ruby classes/modules and non-trivial public methods. Keep them short and easy for junior devs to follow.
 
 ## Operating Order
 

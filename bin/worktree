@@ -376,6 +376,14 @@ worktree_setup() {
     git -C "$ROOT_DIR" worktree add "$worktree_dir" "$branch"
   fi
 
+  # Inject .env from 1Password (or copy from main repo)
+  if [ -f "${worktree_dir}/.env.tpl" ] && command -v op >/dev/null 2>&1; then
+    run_quiet "inject .env from 1Password" op inject -i "${worktree_dir}/.env.tpl" -o "${worktree_dir}/.env"
+  elif [ -f "${ROOT_DIR}/.env" ] && [ ! -f "${worktree_dir}/.env" ]; then
+    cp "${ROOT_DIR}/.env" "${worktree_dir}/.env"
+    say green "  Copied .env from main repo"
+  fi
+
   # Copy credentials if present
   if [ -f "${ROOT_DIR}/config/master.key" ] && [ ! -f "$worktree_dir/config/master.key" ]; then
     cp "${ROOT_DIR}/config/master.key" "$worktree_dir/config/master.key"

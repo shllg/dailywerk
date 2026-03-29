@@ -7,3 +7,13 @@
 #   ["Action", "Comedy", "Drama", "Horror"].each do |genre_name|
 #     MovieGenre.find_or_create_by!(name: genre_name)
 #   end
+
+user = User.find_or_create_by!(email: "sascha@dailywerk.com") do |record|
+  record.name = "Sascha"
+  record.status = "active"
+end
+
+unless user.workspaces.exists?
+  workspace = Workspace.create!(name: "Personal", owner: user)
+  WorkspaceMembership.create!(workspace:, user:, role: "owner")
+end

@@ -3,6 +3,7 @@ DB_HOST=localhost
 DB_PORT=5452
 DB_USERNAME=postgres
 DB_PASSWORD=password
+DB_APP_PASSWORD=dailywerk_app_password
 # DB_NAME=dailywerk_development          # Override for worktrees
 
 # Redis (cache)

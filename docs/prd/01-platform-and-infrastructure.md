@@ -92,180 +92,65 @@ Time-ordered, 128-bit, PostgreSQL native `uuid` type (16 bytes). ULIDs need `var
 
 ---
 
-## 4. User Isolation Architecture
+## 4. Workspace Isolation Architecture
 
-DailyWerk is user-centric: each user owns their data. Isolation is enforced at every layer via `user_id`. No multi-tenancy at MVP — if shared resources (e.g., shared agents) are needed later, a lightweight `agent_shares` table can be added without restructuring the data model.
+DailyWerk now separates **identity** from **data ownership**:
+
+- A WorkOS identity maps to a `users` row.
+- A user belongs to one or more `workspaces` through `workspace_memberships`.
+- All user-facing application data lives under `workspace_id`, not directly under `user_id`.
+
+This indirection is deliberate. It keeps the MVP simple (one default workspace auto-created for each user) while making future collaborative workspaces an additive change instead of a data migration project.
 
 ### 4.1 Isolation Layers
 
-| Layer | Mechanism |
-|-------|-----------|
-| **PostgreSQL** | Shared schema, `user_id` on all tables, RLS policies, connection-level `SET app.current_user_id` |
-| **S3 (Hetzner)** | Per-user prefix `vaults/{user_id}/`, per-user AES-256 SSE-C key |
-| **pgvector** | Embeddings with `user_id` + RLS. All vector searches scoped. |
-| **Redis** | Key namespacing `user:{user_id}:*` |
-| **Disk (vault checkout)** | `/data/vaults/{user_id}/`. LRU eviction. Max 10GB/user. |
+| Layer | Mechanism | Safety default |
+|-------|-----------|----------------|
+| **Rails** | `Current.workspace` + `WorkspaceScoped` concern on workspace-owned models | `none` when no workspace context exists |
+| **PostgreSQL** | Shared schema, `workspace_id` on scoped tables, RLS policies, connection-level `SET app.current_workspace_id` | no rows visible when the variable is unset |
+| **S3 (Hetzner)** | Per-workspace prefix `workspaces/{workspace_id}/...`, per-workspace AES-256 SSE-C key | workspace boundary enforced at storage path level |
+| **pgvector** | Embeddings carry `workspace_id` + RLS | searches stay workspace-scoped |
+| **Redis** | Key namespacing `workspace:{workspace_id}:*` | shared cache space without cross-workspace collisions |
+| **Disk (vault checkout)** | `/data/workspaces/{workspace_id}/vaults/...` | workspace-local working set |
 
 ### 4.2 PostgreSQL Row-Level Security
 
-RLS enforces data boundaries at the database level. Even if application code has a bug that omits a `WHERE user_id = ?`, the database silently filters rows.
+Workspace isolation is defense-in-depth:
 
-The pattern uses PostgreSQL session variables (`SET app.current_user_id`). A Rails middleware sets the variable on every request; an `ensure RESET` block clears it. Background jobs use a `UserScopedJob` concern.
+1. Rails sets `Current.user` and `Current.workspace` after token auth.
+2. `WorkspaceScoped` adds a default scope on workspace-owned models.
+3. PostgreSQL RLS uses `app.current_workspace_id` as the hard database boundary.
 
-```ruby
-# db/migrate/xxx_setup_rls.rb
-class SetupRls < ActiveRecord::Migration[8.0]
-  def up
-    # App MUST connect as non-superuser (superusers bypass RLS)
-    execute <<~SQL
-      DO $$
-      BEGIN
-        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN
-          CREATE ROLE app_user LOGIN PASSWORD '#{Rails.application.credentials.db_app_password}';
-        END IF;
-      END $$;
-    SQL
+RLS still matters even with Rails scoping. If a query bypasses the concern with raw SQL or `unscoped`, PostgreSQL should remain the final barrier.
 
-    USER_SCOPED_TABLES.each do |table|
-      execute "ALTER TABLE #{table} ENABLE ROW LEVEL SECURITY;"
-      execute "ALTER TABLE #{table} FORCE ROW LEVEL SECURITY;"
+The concrete implementation pattern for auth, request/job scoping, and connection reset lives in [RFC 002: Workspace Isolation](../rfc-open/2026-03-30-workspace-isolation.md).
 
-      execute <<~SQL
-        CREATE POLICY user_isolation ON #{table}
-          FOR ALL
-          TO app_user
-          USING (user_id::text = current_setting('app.current_user_id', true))
-          WITH CHECK (user_id::text = current_setting('app.current_user_id', true));
-      SQL
-    end
+PRD-level invariants:
 
-    USER_SCOPED_TABLES.each do |table|
-      execute "GRANT SELECT, INSERT, UPDATE, DELETE ON #{table} TO app_user;"
-    end
-    execute "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;"
-  end
-
-  USER_SCOPED_TABLES = %w[
-    agents sessions channels messages tool_calls
-    memory_entries daily_logs notes
-    conversation_archives api_credentials mcp_server_configs
-    usage_records usage_daily_summaries tasks calendar_events integrations
-    bridges vaults vault_files vault_chunks
-    credit_balances credit_transactions
-  ].freeze
-  # NOTE: messages, tool_calls, and conversation_archives need user_id
-  # added (denormalized) — see schema §5.4–5.5 below.
-  # vault_links and bridge_events lack user_id; access controlled via
-  # JOINs to parent tables (vault_files, bridges).
-end
-```
-
-```ruby
-# app/middleware/user_rls_middleware.rb
-class UserRlsMiddleware
-  def initialize(app)
-    @app = app
-  end
-
-  def call(env)
-    request = ActionDispatch::Request.new(env)
-    user_id = resolve_user(request)
-
-    if user_id
-      set_rls_context(user_id) { @app.call(env) }
-    else
-      @app.call(env)
-    end
-  end
-
-  private
-
-  def resolve_user(request)
-    request.env["current_user_id"] # Set by auth middleware (WorkOS)
-  end
-
-  def set_rls_context(user_id)
-    # Session-level SET persists on the connection until RESET.
-    # This is safer than SET LOCAL under Falcon's fiber model because
-    # SET LOCAL requires an explicit transaction wrapper.
-    ActiveRecord::Base.connection.execute(
-      "SET app.current_user_id = #{ActiveRecord::Base.connection.quote(user_id)}"
-    )
-    yield
-  ensure
-    ActiveRecord::Base.connection.execute("RESET app.current_user_id")
-  end
-end
-```
-
-```ruby
-# config/initializers/rls_safety.rb — Defense-in-depth: reset RLS on connection return
-ActiveSupport.on_load(:active_record) do
-  ActiveRecord::ConnectionAdapters::AbstractAdapter.set_callback :checkin, :before do
-    raw_connection.exec("RESET app.current_user_id") rescue nil
-  end
-end
-```
-
-> **Invariant**: Never perform non-DB I/O (HTTP calls, LLM streaming, file reads) inside a database transaction. Transactions hold connections; under Falcon's fiber concurrency, long-held connections exhaust the pool.
-
-```ruby
-# app/jobs/concerns/user_scoped_job.rb
-module UserScopedJob
-  extend ActiveSupport::Concern
-
-  included do
-    around_perform :set_rls_context
-  end
-
-  private
-
-  def set_rls_context
-    uid = self.class.extract_user_id(arguments)
-    raise ArgumentError, "#{self.class.name} requires user_id: keyword arg" unless uid
-
-    ActiveRecord::Base.connection.execute(
-      "SET app.current_user_id = #{ActiveRecord::Base.connection.quote(uid)}"
-    )
-    yield
-  ensure
-    ActiveRecord::Base.connection.execute("RESET app.current_user_id") if uid
-  end
-
-  class_methods do
-    def extract_user_id(args)
-      # Convention: all user-scoped jobs pass user_id: as keyword arg
-      args.last.try(:[], :user_id) if args.last.is_a?(Hash)
-    end
-  end
-end
-```
-
-All jobs touching user data must `include UserScopedJob` and pass `user_id:` as keyword argument.
-
-```yaml
-# config/database.yml
-production:
-  primary:
-    adapter: postgresql
-    username: app_user          # NOT the superuser — RLS enforced
-    password: <%= Rails.application.credentials.db_app_password %>
-  primary_admin:
-    adapter: postgresql
-    username: postgres          # Superuser for migrations only
-    password: <%= Rails.application.credentials.db_admin_password %>
-    migrations_paths: db/migrate
-```
+- request and job execution must set workspace context before touching workspace-owned data
+- the database must fail closed when no workspace context is present
+- the application must use a non-superuser database role where RLS is expected to enforce isolation
+- long-running non-database I/O must not hold open database transactions under Falcon's fiber concurrency model
 
 ### 4.3 Vault Storage Security (SSE-C)
 
-On user creation, generate unique AES-256 key → stored encrypted in PG (Rails credentials / KMS). Every S3 PUT/GET includes SSE-C headers with user's key. Hetzner encrypts, then discards key. Cross-user read impossible even if bucket compromised.
+On workspace creation, generate a unique AES-256 key → store it encrypted in PostgreSQL (Rails credentials / KMS). Every S3 PUT/GET includes SSE-C headers with the workspace key. Hetzner encrypts, then discards the key. Cross-workspace reads remain impossible even if the bucket is compromised.
 
 **Future**: Envelope encryption with external KMS (e.g., Hashicorp Vault). The Rails master key encrypts a per-user DEK, but the DEK itself should be wrapped by a KMS-managed key. Database compromise alone should be insufficient to access vault data.
 
-### 4.4 Future: Shared Resources
+### 4.4 Workspace Memberships
 
-If shared agents or shared vaults are needed later, use a permissions table rather than full multi-tenancy:
+Workspace memberships are the collaboration pivot:
+
+- `owner`, `admin`, `member`, and `viewer` roles live on `workspace_memberships`.
+- Fine-grained permissions can be added later through an `abilities` jsonb column.
+- Adding a second user to a workspace becomes a single insert, not a data migration.
+
+Future shared resources can still exist, but they should build on workspace membership instead of bypassing it with ad hoc user-to-user sharing tables.
+
+### 4.5 Future: Shared Resources
+
+If sub-workspace sharing is ever needed, layer it on top of the workspace model rather than replacing it:
 
 ```sql
 -- Lightweight sharing without tenant refactor
@@ -273,13 +158,13 @@ agent_shares (id, agent_id, owner_user_id, shared_with_user_id,
               permission enum(read,use,admin), created_at)
 ```
 
-RLS policies can be extended to include shared resources: `USING (user_id = current_user_id OR id IN (SELECT agent_id FROM agent_shares WHERE shared_with_user_id = current_user_id))`.
+RLS policies can be extended to include shared resources: `USING (workspace_id = current_workspace_id OR id IN (SELECT agent_id FROM agent_shares WHERE shared_with_user_id = current_user_id))`.
 
 ---
 
 ## 5. Canonical Database Schema
 
-All IDs UUIDv7. All tables with `user_id` have RLS. This is the **single source of truth** for the data model — other PRDs reference this section.
+All IDs UUIDv7. Identity lives on `users`; collaboration and scoping live on `workspaces`; workspace-owned tables use `workspace_id` and RLS. This section describes the target data model. RFCs own implementable slices and migration-level detail.
 
 ### 5.1 Extensions
 
@@ -294,34 +179,14 @@ end
 
 ### 5.2 Core Tables
 
-```ruby
-class CreateCoreTables < ActiveRecord::Migration[8.0]
-  def change
-    create_table :users, id: :uuid do |t|
-      t.string   :workos_id,    null: false, index: { unique: true }
-      t.string   :email,        null: false, index: { unique: true }
-      t.references :plan,       type: :uuid, foreign_key: true
-      t.text     :vault_encryption_key_enc  # AES-256 key, encrypted at rest
-      t.string   :stripe_customer_id
-      t.string   :stripe_subscription_id
-      t.string   :status,       null: false, default: "pending"
-      # status: pending (admin approval), active, suspended, cancelled
-      t.text     :synthesized_profile       # Layer 5 memory: daily background synthesis
-      t.jsonb    :settings,     default: {}
-      t.timestamps
-    end
+The implemented identity and ownership tables are specified in [RFC 002: Workspace Isolation](../rfc-open/2026-03-30-workspace-isolation.md).
 
-    create_table :plans, id: :uuid do |t|
-      t.string   :name,           null: false
-      t.integer  :monthly_credits, null: false
-      t.integer  :price_cents,    null: false
-      t.string   :stripe_price_id
-      t.jsonb    :features,      default: {}
-      t.timestamps
-    end
-  end
-end
-```
+| Table | Purpose | Notes |
+|-------|---------|-------|
+| `users` | Identity layer | WorkOS-backed user record with account status and settings |
+| `workspaces` | Ownership boundary | Default workspace per user today; collaboration boundary long term |
+| `workspace_memberships` | User-to-workspace join | Holds role and future fine-grained abilities |
+| `plans` | Billing catalog | Product plan definition for credits, pricing, and feature flags |
 
 ### 5.3 Agent Tables
 
@@ -331,10 +196,10 @@ For agent model details and runtime behavior, see [03 §2](./03-agentic-system.m
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `user_id` | uuid FK | Owner (required) |
-| `slug` | string | Unique per user |
+| `workspace_id` | uuid FK | Owning workspace (required) |
+| `slug` | string | Unique per workspace |
 | `name` | string | Display name |
-| `is_default` | boolean | Default agent for user |
+| `is_default` | boolean | Default agent for workspace |
 | `soul` | text | Personality, tone, boundaries |
 | `instructions` | text | Operating procedures (system prompt) |
 | `instructions_path` | string | ERB prompt file (admin-only, validated against allowlist) |
@@ -354,7 +219,7 @@ For agent model details and runtime behavior, see [03 §2](./03-agentic-system.m
 | `active` | boolean | Soft delete |
 | `metadata` | jsonb | Extensible metadata |
 
-**Indexes**: `[user_id, slug]` unique, `[user_id, is_default]`.
+**Indexes**: `[workspace_id, slug]` unique, `[workspace_id, is_default]`.
 
 #### `agent_channel_bindings` — Message Routing
 
@@ -371,7 +236,7 @@ For session lifecycle and compaction details, see [03 §5](./03-agentic-system.m
 | `channel_type` | string | web, telegram, api, signal, whatsapp |
 | `external_id` | string | telegram chat_id, signal number, etc. |
 | `config` | jsonb | webhook_url, bot_token_ref, etc. |
-| `user_id` | uuid FK | Owner |
+| `workspace_id` | uuid FK | Owning workspace |
 
 **Index**: `[channel_type, external_id]` unique. Deferred — RFC 002 treats web as an implicit channel.
 
@@ -379,7 +244,7 @@ For session lifecycle and compaction details, see [03 §5](./03-agentic-system.m
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `user_id` | uuid FK | Owner (required) |
+| `workspace_id` | uuid FK | Owning workspace (required) |
 | `agent_id` | uuid FK | Which agent handles this session (required) |
 | `channel_id` | uuid FK | Which channel (deferred in RFC 002) |
 | `session_type` | string | interactive / background / scheduled |
@@ -394,7 +259,7 @@ For session lifecycle and compaction details, see [03 §5](./03-agentic-system.m
 | `metadata` | jsonb | Extensible |
 | `started_at`, `last_activity_at`, `ended_at` | datetime | Lifecycle timestamps |
 
-**Indexes**: `[agent_id, channel_id] WHERE status = 'active'` unique, `[user_id, status]`.
+**Indexes**: `[agent_id, channel_id] WHERE status = 'active'` unique, `[workspace_id, status]`.
 
 Uses ruby_llm's `acts_as_chat` for automatic message persistence and LLM context management.
 
@@ -403,7 +268,7 @@ Uses ruby_llm's `acts_as_chat` for automatic message persistence and LLM context
 | Column | Type | Description |
 |--------|------|-------------|
 | `session_id` | uuid FK | Parent session (required) |
-| `user_id` | uuid FK | Denormalized for RLS |
+| `workspace_id` | uuid FK | Denormalized for RLS |
 | `role` | string | user / assistant / system / tool |
 | `content` | text | Message text (no presence validation — ruby_llm creates blank records before streaming) |
 | `content_raw` | text | Provider-specific raw payload (ruby_llm v1.9+) |
@@ -425,7 +290,7 @@ Uses ruby_llm's `acts_as_message` for automatic token tracking and streaming sup
 | Column | Type | Description |
 |--------|------|-------------|
 | `message_id` | uuid FK | Parent message (required) |
-| `user_id` | uuid FK | Denormalized for RLS |
+| `workspace_id` | uuid FK | Denormalized for RLS |
 | `tool_call_id` | string | Provider's tool call ID |
 | `name` | string | Tool name |
 | `arguments` | jsonb | Tool arguments |

@@ -10,6 +10,7 @@ AI-powered personal assistant with conversational agents, vault sync, and multi-
 - **ALWAYS use UUIDv7** for all new table primary keys: `id :uuid, default: -> { "gen_random_uuid_v7()" }`.
 - **ALWAYS use strong parameters** — never `permit!`, always explicit allowlists.
 - **ALWAYS use `pnpm`** for frontend packages (never yarn/npm).
+- **ALWAYS add concise YARD comments** to new or changed Ruby classes/modules and non-trivial public methods. Keep them short and junior-readable.
 
 ## Tech Stack
 

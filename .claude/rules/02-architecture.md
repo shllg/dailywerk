@@ -54,3 +54,4 @@ end
 - **Fat model / skinny controller** — Controllers: auth, params, service call, render. Models: validations, scopes, associations.
 - **Service objects over callbacks** — Prefer explicit service objects for multi-step business logic. Keep ActiveRecord callbacks simple (e.g., setting defaults).
 - **No God objects** — If a class grows beyond ~200 lines, extract concerns or services.
+- **Document Ruby APIs** — Add concise YARD comments to new or changed Ruby classes/modules and non-trivial public methods. Skip trivial accessors and keep comments short.

@@ -13,6 +13,7 @@ module Dailywerk
     config.autoload_lib(ignore: %w[assets tasks])
 
     config.api_only = true
+    config.active_record.schema_format = :sql
 
     # Background jobs
     config.active_job.queue_adapter = :good_job

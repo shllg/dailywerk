@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve the repository root (works from inside any worktree)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
+TPL="${SCRIPT_DIR}/.env.tpl"
+OUT="${SCRIPT_DIR}/.env"
+
+if [ ! -f "$TPL" ]; then
+  echo "Error: ${TPL} not found" >&2
+  exit 1
+fi
+
+if ! command -v op >/dev/null 2>&1; then
+  echo "Error: 1Password CLI (op) not found. Install it from https://developer.1password.com/docs/cli" >&2
+  exit 1
+fi
+
+op inject -i "$TPL" -o "$OUT"
+echo "Injected secrets into ${OUT}"
