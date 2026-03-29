@@ -1,8 +1,30 @@
-Follow Rails 8 conventions and the patterns documented in CLAUDE.md.
-Use UUIDv7 for all new primary keys: id :uuid, default: -> { "gen_random_uuid_v7()" }.
-Falcon server: use fiber-safe patterns only (no Thread.current, no blocking I/O, no lazy mutex).
-GoodJob external mode only — never inline or async execution.
-Use strong_migrations gem for safe database migrations.
-ActiveRecord::Encryption for API keys and credentials (non-deterministic).
-Use pnpm for frontend packages (never yarn/npm).
-Never auto-commit or push to git.
+# Allow read-only git commands
+prefix_rule(pattern=["git", "status"], decision="allow")
+prefix_rule(pattern=["git", "diff"], decision="allow")
+prefix_rule(pattern=["git", "log"], decision="allow")
+prefix_rule(pattern=["git", "show"], decision="allow")
+prefix_rule(pattern=["git", "branch"], decision="allow")
+
+# Allow quality checks
+prefix_rule(pattern=["bundle", "exec", "rails", "test"], decision="allow")
+prefix_rule(pattern=["bundle", "exec", "rubocop"], decision="allow")
+prefix_rule(pattern=["bundle", "exec", "brakeman"], decision="allow")
+prefix_rule(pattern=["bundle", "exec", "bundler-audit"], decision="allow")
+prefix_rule(pattern=["pnpm", "test"], decision="allow")
+prefix_rule(pattern=["pnpm", "run", "lint"], decision="allow")
+
+# Allow read-only exploration
+prefix_rule(pattern=["cat"], decision="allow")
+prefix_rule(pattern=["ls"], decision="allow")
+prefix_rule(pattern=["find"], decision="allow")
+prefix_rule(pattern=["head"], decision="allow")
+prefix_rule(pattern=["tail"], decision="allow")
+prefix_rule(pattern=["wc"], decision="allow")
+prefix_rule(pattern=["rg"], decision="allow")
+
+# Forbid destructive git ops
+prefix_rule(pattern=["git", "push"], decision="forbidden")
+prefix_rule(pattern=["git", "reset"], decision="forbidden")
+prefix_rule(pattern=["git", "checkout"], decision="forbidden")
+prefix_rule(pattern=["git", "add"], decision="forbidden")
+prefix_rule(pattern=["git", "commit"], decision="forbidden")

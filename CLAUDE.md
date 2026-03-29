@@ -55,7 +55,7 @@ bundle exec bundler-audit check --update  # Dependency audit
 - Root `/` — Rails 8.1 API backend (bundler)
 - `frontend/` — Vite + React 19 SPA (pnpm, separate package.json)
 - `docs/prd/` — Product requirements (architecture plans, not implemented code)
-- `docs/rfc/` — RFCs for deferred design decisions
+- `docs/rfc-open/` — Open RFCs (date-prefixed, design decisions in progress)
 
 ## Key References
 
@@ -64,7 +64,8 @@ bundle exec bundler-audit check --update  # Dependency audit
 - `docs/prd/03-agentic-system.md` — Agent runtime, memory, tools, streaming
 - `docs/prd/04-billing-and-operations.md` — Credits, BYOK, GoodJob config, MCP
 - `docs/prd/05-ai-developer-tooling.md` — Expectations for Claude Code and Codex
-- `docs/rfc/001-ai-tooling-phase2.md` — Deferred agent/skill/hook config
+- `docs/rfc-open/2026-03-29-ai-tooling-phase2.md` — Deferred agent/skill/hook config
+- `docs/rfc-open/2026-03-29-simple-chat-conversation.md` — First chat conversation implementation
 
 ## Claude Code Configuration
 

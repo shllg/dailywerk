@@ -35,7 +35,7 @@ Vite SPA (React 19) ──→ Falcon ──→ Rails API ──→ PostgreSQL 17
 ├── app/           Models, controllers, services, jobs, channels
 ├── frontend/      Vite + React 19 SPA (pnpm, separate package.json)
 ├── docs/prd/      Product requirements (architecture plans, not implemented code)
-├── docs/rfc/      RFCs for deferred design decisions
+├── docs/rfc-open/ Open RFCs (date-prefixed, design decisions in progress)
 ├── config/        Rails configuration
 ├── db/            Migrations, schema, seeds
 └── test/          Minitest test suite
