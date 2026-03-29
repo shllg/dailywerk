@@ -325,159 +325,115 @@ end
 
 ### 5.3 Agent Tables
 
-For agent model details and runtime behavior, see [03 §2](./03-agentic-system.md#2-agent-model).
+For agent model details and runtime behavior, see [03 §2](./03-agentic-system.md#2-agent-model). For initial minimal schema, see [RFC 002 §2.1](../rfc-open/2026-03-29-simple-chat-conversation.md#21-agents-table-minimal).
 
-```ruby
-class CreateAgentTables < ActiveRecord::Migration[8.0]
-  def change
-    create_table :agents, id: :uuid do |t|
-      t.references :user,        type: :uuid, null: false, foreign_key: true
-      t.string   :slug,          null: false
-      t.string   :name,          null: false
-      t.boolean  :is_default,    default: false
+#### `agents` — Full Target Schema
 
-      # Identity & behavior
-      t.text     :soul                        # Personality, tone, boundaries
-      t.text     :instructions                # Operating procedures
-      t.string   :instructions_path           # Alternative: ERB prompt file
-      t.jsonb    :identity,      default: {}  # Structured persona, tone, constraints, examples
+| Column | Type | Description |
+|--------|------|-------------|
+| `user_id` | uuid FK | Owner (required) |
+| `slug` | string | Unique per user |
+| `name` | string | Display name |
+| `is_default` | boolean | Default agent for user |
+| `soul` | text | Personality, tone, boundaries |
+| `instructions` | text | Operating procedures (system prompt) |
+| `instructions_path` | string | ERB prompt file (admin-only, validated against allowlist) |
+| `identity` | jsonb | Structured persona, tone, constraints, examples |
+| `model_id` | string | LLM model ID (default: gpt-5.4) |
+| `provider` | string | nil = auto-detect from model_id |
+| `temperature` | float | Sampling temperature (default: 0.7) |
+| `params` | jsonb | Extra model params (max_tokens, etc.) |
+| `thinking` | jsonb | Extended thinking config `{ enabled, budget_tokens }` |
+| `tool_names` | jsonb array | Enabled tool names |
+| `handoff_targets` | jsonb array | Agent slugs this agent can hand off to |
+| `enabled_mcps` | jsonb | MCP server configs |
+| `tool_configs` | jsonb | Per-tool configuration |
+| `memory_isolation` | string | shared / isolated / read_shared |
+| `sandbox_level` | string | full / restricted / readonly |
+| `vault_access` | string array | Which vault IDs this agent can access |
+| `active` | boolean | Soft delete |
+| `metadata` | jsonb | Extensible metadata |
 
-      # Model configuration
-      t.string   :model_id,      null: false, default: "claude-sonnet-4-6"
-      t.string   :provider                    # nil = auto-detect
-      t.float    :temperature,   default: 0.7
-      t.jsonb    :params,        default: {}  # max_tokens, etc.
-      t.jsonb    :thinking,      default: {}  # { enabled: true, budget_tokens: 10000 }
+**Indexes**: `[user_id, slug]` unique, `[user_id, is_default]`.
 
-      # Tool & capability configuration
-      t.jsonb    :tool_names,    default: []  # ["notes", "memory", "vault_search"]
-      t.jsonb    :handoff_targets, default: [] # ["research_agent", "code_agent"]
-      t.jsonb    :enabled_mcps,  default: {}  # MCP server configs (also see mcp_server_configs table)
-      t.jsonb    :tool_configs,  default: {}  # Per-tool config (calendar rules, etc.)
+#### `agent_channel_bindings` — Message Routing
 
-      # Access controls (DailyWerk-specific)
-      t.string   :memory_isolation, default: "shared"
-      # shared: reads/writes shared long-term memory
-      # isolated: own long-term memory only
-      # read_shared: reads shared, writes to own
-      t.string   :sandbox_level,    default: "full"
-      # full: all enabled tools available
-      # restricted: subset of tools, confirmation required for destructive ops
-      # readonly: read-only tools only
-      t.string   :vault_access,  array: true, default: [] # Which vault IDs this agent can access
-
-      t.boolean  :active,        default: true
-      t.jsonb    :metadata,      default: {}
-      t.timestamps
-
-      t.index [:user_id, :slug], unique: true
-      t.index [:user_id, :is_default]
-    end
-
-    create_table :agent_channel_bindings, id: :uuid do |t|
-      t.references :agent,   type: :uuid, null: false, foreign_key: true
-      t.string   :channel,   null: false  # signal, telegram, whatsapp, email, web, in_app
-      t.string   :channel_account_id       # Which Signal number, Telegram bot, etc.
-      t.string   :channel_thread_id        # Specific group/thread, or NULL for all DMs
-      t.integer  :priority,  default: 0    # Lower = higher priority
-      t.jsonb    :filter_rules, default: {} # Keyword triggers, sender filters
-      t.timestamps
-    end
-  end
-end
-```
+Routes inbound messages to agents based on channel, account, and thread. Fields: `agent_id` (FK), `channel` (type string), `channel_account_id`, `channel_thread_id`, `priority`, `filter_rules` (jsonb). Deferred until multi-channel routing ships.
 
 ### 5.4 Channel, Session & Message Tables
 
-For session lifecycle and compaction details, see [03 §5](./03-agentic-system.md#5-session-management) and [03 §8](./03-agentic-system.md#8-compaction).
+For session lifecycle and compaction details, see [03 §5](./03-agentic-system.md#5-session-management) and [03 §8](./03-agentic-system.md#8-compaction). For initial minimal schema, see [RFC 002 §2](../rfc-open/2026-03-29-simple-chat-conversation.md#2-database-schema).
 
-```ruby
-class CreateSessionTables < ActiveRecord::Migration[8.0]
-  def change
-    # Channels — normalized abstraction for messaging endpoints
-    create_table :channels, id: :uuid do |t|
-      t.string   :channel_type,  null: false  # web, telegram, api, signal, whatsapp
-      t.string   :external_id                 # telegram chat_id, signal number, etc.
-      t.jsonb    :config,        default: {}  # webhook_url, bot_token_ref, etc.
-      t.references :user,        type: :uuid, foreign_key: true
-      t.timestamps
-      t.index [:channel_type, :external_id], unique: true
-    end
+#### `channels` — Messaging Endpoints
 
-    # Sessions — one active session per agent × channel
-    create_table :sessions, id: :uuid do |t|
-      t.references :user,    type: :uuid, null: false, foreign_key: true
-      t.references :agent,   type: :uuid, null: false, foreign_key: true
-      t.references :channel, type: :uuid, null: false, foreign_key: true
+| Column | Type | Description |
+|--------|------|-------------|
+| `channel_type` | string | web, telegram, api, signal, whatsapp |
+| `external_id` | string | telegram chat_id, signal number, etc. |
+| `config` | jsonb | webhook_url, bot_token_ref, etc. |
+| `user_id` | uuid FK | Owner |
 
-      t.string   :session_type, default: "interactive"
-      # interactive: user-initiated conversation
-      # background: agent-initiated (scheduled tasks, notifications)
-      # scheduled: cron-triggered (daily summaries, etc.)
+**Index**: `[channel_type, external_id]` unique. Deferred — RFC 002 treats web as an implicit channel.
 
-      t.string   :status,       default: "active"  # active, compacted, archived
-      t.string   :model_id                          # Override agent's default model
-      t.string   :provider                          # Override agent's default provider
+#### `sessions` — Conversation Continuity
 
-      t.text     :summary                           # Compacted conversation summary
-      t.integer  :message_count, default: 0
-      t.integer  :total_tokens,  default: 0
-      t.jsonb    :context_data,  default: {}        # Sliding window metadata
-      t.jsonb    :metadata,      default: {}
+| Column | Type | Description |
+|--------|------|-------------|
+| `user_id` | uuid FK | Owner (required) |
+| `agent_id` | uuid FK | Which agent handles this session (required) |
+| `channel_id` | uuid FK | Which channel (deferred in RFC 002) |
+| `session_type` | string | interactive / background / scheduled |
+| `status` | string | active / compacted / archived |
+| `model_id` | string | Override agent's default model |
+| `provider` | string | Override agent's default provider |
+| `title` | string | Display title |
+| `summary` | text | Compacted conversation summary |
+| `message_count` | integer | Message count |
+| `total_tokens` | integer | Total tokens used |
+| `context_data` | jsonb | Sliding window metadata |
+| `metadata` | jsonb | Extensible |
+| `started_at`, `last_activity_at`, `ended_at` | datetime | Lifecycle timestamps |
 
-      t.datetime :started_at
-      t.datetime :last_activity_at
-      t.datetime :ended_at
-      t.timestamps
+**Indexes**: `[agent_id, channel_id] WHERE status = 'active'` unique, `[user_id, status]`.
 
-      t.index [:agent_id, :channel_id], unique: true, where: "status = 'active'"
-      t.index [:user_id, :status]
-    end
+Uses ruby_llm's `acts_as_chat` for automatic message persistence and LLM context management.
 
-    # Messages — rich token tracking, importance scoring, thinking support
-    create_table :messages, id: :uuid do |t|
-      t.references :session, type: :uuid, null: false, foreign_key: true
-      t.references :user, type: :uuid, null: false, foreign_key: true  # Denormalized for RLS — also available via session.user_id
-      t.string   :role,      null: false   # user, assistant, system, tool
-      t.text     :content
-      t.text     :content_raw               # Provider-specific Content::Raw
-      t.string   :response_id               # OpenAI Responses API chaining
-      t.string   :agent_slug                # Which agent produced this message
+#### `messages` — Conversation Messages
 
-      # Token accounting (split by type for cost calculation)
-      t.integer  :input_tokens
-      t.integer  :output_tokens
-      t.integer  :cached_tokens
+| Column | Type | Description |
+|--------|------|-------------|
+| `session_id` | uuid FK | Parent session (required) |
+| `user_id` | uuid FK | Denormalized for RLS |
+| `role` | string | user / assistant / system / tool |
+| `content` | text | Message text (no presence validation — ruby_llm creates blank records before streaming) |
+| `content_raw` | text | Provider-specific raw payload (ruby_llm v1.9+) |
+| `response_id` | string | OpenAI Responses API chaining |
+| `agent_slug` | string | Which agent produced this message |
+| `model_id` | string | Which model produced this message |
+| `input_tokens`, `output_tokens`, `cached_tokens` | integer | Token accounting |
+| `thinking_text`, `thinking_signature` | text | Extended thinking support (v1.10+) |
+| `thinking_tokens` | integer | Thinking token count |
+| `compacted` | boolean | Whether this message has been compacted |
+| `importance` | integer | 1-10, affects compaction priority |
 
-      # Extended thinking support
-      t.text     :thinking_text
-      t.text     :thinking_signature
-      t.integer  :thinking_tokens
+**Indexes**: `[session_id, created_at]`, `[session_id, compacted]`.
 
-      # Compaction
-      t.boolean  :compacted,   default: false
-      t.integer  :importance,  default: 5    # 1-10, affects compaction priority
+Uses ruby_llm's `acts_as_message` for automatic token tracking and streaming support.
 
-      t.timestamps
-      t.index [:session_id, :created_at]
-      t.index [:session_id, :compacted]
-    end
+#### `tool_calls` — Tool Execution Tracking
 
-    # Tool calls — separate table for structured tool execution tracking
-    create_table :tool_calls, id: :uuid do |t|
-      t.references :message, type: :uuid, null: false, foreign_key: true
-      t.references :user, type: :uuid, null: false, foreign_key: true  # Denormalized for RLS — also available via session.user_id
-      t.string   :tool_call_id
-      t.string   :name
-      t.jsonb    :arguments,   default: {}
-      t.text     :result
-      t.string   :status,      default: "pending"  # pending, success, error
-      t.integer  :duration_ms
-      t.timestamps
-    end
-  end
-end
-```
+| Column | Type | Description |
+|--------|------|-------------|
+| `message_id` | uuid FK | Parent message (required) |
+| `user_id` | uuid FK | Denormalized for RLS |
+| `tool_call_id` | string | Provider's tool call ID |
+| `name` | string | Tool name |
+| `arguments` | jsonb | Tool arguments |
+| `result` | text | Tool execution result |
+| `status` | string | pending / success / error |
+| `duration_ms` | integer | Execution time |
+
+Uses ruby_llm's `acts_as_tool_call`. Required by the gem even when no tools are configured.
 
 ### 5.5 Memory Tables
 
@@ -880,7 +836,7 @@ Docker Compose for MVP. Single server for first 10 test users (keep all vaults w
 1. **Vault cold-start latency** — Large vaults (5-10GB) re-checkout from S3 could take minutes. MVP: keep all test users warm, monitor. Solve when real usage data exists.
 2. **Multi-vault pricing** — Additional vaults as paid feature. Pricing TBD. Architecture supports it (vaults table, per-vault encryption, per-agent vault_access).
 3. **Shared resources** — Agent sharing, vault sharing. Deferred to post-MVP. Schema supports it via `agent_shares` pattern (§4.4).
-4. **Frontend architecture** — Vite + React + TypeScript + Tailwind + DaisyUI chosen. Component structure, state management, and API contract details TBD.
+4. **Frontend architecture** — Vite + React + TypeScript + Tailwind + DaisyUI chosen. [RFC 002](../rfc-open/2026-03-29-simple-chat-conversation.md) defines the initial chat UI, app shell with top bar, and API contract. Component patterns to be codified after more features ship.
 5. **Observability** — Logging, metrics, alerting, health checks, session replay for debugging. Needs dedicated design.
 6. **GDPR / data deletion** — Define `UserDeletionService` for hard-delete of all user data across PG, S3, Redis, and vault checkouts.
 7. **SPA authentication** — React SPA and Rails API must share a root domain for HttpOnly/Secure/SameSite cookie-based auth. JWT in localStorage is an XSS vector.

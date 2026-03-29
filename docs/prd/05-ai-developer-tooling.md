@@ -31,7 +31,7 @@ As the codebase grows, AI tools should gain domain-specific expertise:
 - **Review workflows:** Automated code review with domain-specific checklists
 - **Skill-based guidance:** Contextual reminders when editing specific code areas
 
-**Trigger conditions and implementation details:** See [RFC 001: AI Tooling Phase 2](../rfc/001-ai-tooling-phase2.md)
+**Trigger conditions and implementation details:** See [RFC 001: AI Tooling Phase 2](../rfc-open/2026-03-29-ai-tooling-phase2.md)
 
 ## Success Criteria
 

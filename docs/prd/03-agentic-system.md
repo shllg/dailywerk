@@ -5,6 +5,8 @@
 > For channel adapters and vault sync: see [02-integrations-and-channels.md](./02-integrations-and-channels.md).
 > For BYOK, MCP, cost tracking, and GoodJob config: see [04-billing-and-operations.md](./04-billing-and-operations.md).
 
+**Implementation status:** [RFC 002](../rfc-open/2026-03-29-simple-chat-conversation.md) implements the first slice — simple chat with a single agent (no tools, no memory, no handoffs). Sections below describe the full target architecture.
+
 ---
 
 ## 1. ruby_llm Framework Foundation
@@ -57,61 +59,21 @@ Per-agent memory scoping (see [§7](#7-memory-architecture) for full memory arch
 
 ### Resolved Instructions
 
-The system prompt is composed from multiple agent fields:
+The system prompt is assembled from multiple agent fields in priority order:
 
-```ruby
-# app/models/agent.rb
-class Agent < ApplicationRecord
-  belongs_to :user
-  has_many :sessions, dependent: :destroy
+| Source | When Used | Description |
+|--------|-----------|-------------|
+| `instructions_path` (ERB) | If set (admin-only) | Template file rendered with agent context. Validated against allowlist. |
+| `instructions` (text) | Default fallback | Free-text system prompt. |
+| `soul` | If present | Personality, tone, boundaries — appended as "## Soul" section. |
+| `identity` (jsonb) | If present | Structured persona, tone, constraints — appended as separate sections. |
 
-  validates :slug, presence: true, uniqueness: { scope: :user_id }
-  validates :model_id, presence: true
+Key behaviors:
+- `thinking_config` returns extended thinking params when `thinking.enabled` is true.
+- `tool_classes` resolves tool name strings to Ruby classes via `ToolRegistry`.
+- `handoff_agents` resolves `handoff_targets` slugs to active Agent records for the same user.
 
-  ALLOWED_INSTRUCTION_PATHS = %w[
-    prompts/general.md.erb
-    prompts/research.md.erb
-    prompts/diary.md.erb
-    prompts/health.md.erb
-  ].freeze
-
-  def resolved_instructions
-    base = if instructions_path.present?
-      raise "Invalid instructions_path" unless instructions_path.in?(ALLOWED_INSTRUCTION_PATHS)
-      template = File.read(Rails.root.join("app", instructions_path))
-      ERB.new(template).result_with_hash(agent: self, identity: identity)
-    else
-      instructions.to_s
-    end
-
-    parts = [base]
-    parts << "## Soul\n#{soul}" if soul.present?
-
-    if identity.present?
-      parts << "## Identity\n#{identity['persona']}" if identity["persona"]
-      parts << "## Tone\n#{identity['tone']}" if identity["tone"]
-      if identity["constraints"].present?
-        parts << "## Constraints\n" + identity["constraints"].map { |c| "- #{c}" }.join("\n")
-      end
-    end
-
-    parts.compact.join("\n\n")
-  end
-
-  def thinking_config
-    return {} unless thinking.present? && thinking["enabled"]
-    { thinking: { type: "enabled", budget_tokens: thinking["budget_tokens"] || 10_000 } }
-  end
-
-  def tool_classes
-    tool_names.filter_map { |name| ToolRegistry.resolve(name) }
-  end
-
-  def handoff_agents
-    Agent.where(slug: handoff_targets, user: user, active: true)
-  end
-end
-```
+> **Initial implementation:** [RFC 002](../rfc-open/2026-03-29-simple-chat-conversation.md) implements a minimal Agent model where `resolved_instructions` simply returns `instructions.to_s`. Full soul/identity/ERB template support ships in a later RFC.
 
 ### Admin / Config Tools (Master Chat)
 
@@ -128,39 +90,7 @@ These are gated by a confirmation step. Changes take effect on the next session 
 
 ### Agent CRUD API
 
-Agents are also manageable via REST API for the dashboard:
-
-```ruby
-# app/controllers/api/v1/agents_controller.rb
-class Api::V1::AgentsController < ApplicationController
-  def create
-    agent = current_user.agents.build(agent_params)
-    if agent.save
-      render json: AgentSerializer.new(agent), status: :created
-    else
-      render json: { errors: agent.errors }, status: :unprocessable_entity
-    end
-  end
-
-  def update
-    agent = current_user.agents.find_by!(slug: params[:slug])
-    agent.update!(agent_params)
-    render json: AgentSerializer.new(agent)
-  end
-
-  private
-
-  def agent_params
-    params.require(:agent).permit(
-      :slug, :name, :model_id, :provider, :soul, :instructions,
-      :temperature, :active, :is_default, :memory_isolation, :sandbox_level,
-      tool_names: [], handoff_targets: [], vault_access: [],
-      params: {}, identity: {}, thinking: {}, tool_configs: {}, metadata: {}
-    )
-    # NOTE: instructions_path is NOT user-settable — admin-only field
-  end
-end
-```
+Agents are manageable via REST API (`Api::V1::AgentsController`) for the dashboard. Standard create/update actions with strong parameters. `instructions_path` is NOT user-settable — admin-only field. Deferred until multi-agent management ships (RFC 002 uses a single seeded default agent).
 
 ---
 
@@ -168,159 +98,41 @@ end
 
 The core runtime is a single-threaded ReAct loop — the same pattern Claude Code and Codex use — wrapped in a service object. **Radical simplicity in the core loop outperforms complex multi-agent swarms.**
 
-```ruby
-# app/services/agent_runtime.rb
-class AgentRuntime
-  MAX_TOOL_ITERATIONS = 25
-  COMPACTION_THRESHOLD = 0.75  # Trigger at 75% of context window
-  MAX_HANDOFF_DEPTH = 3        # Prevent recursive handoff loops
+### Runtime Flow
 
-  def initialize(session:, user:, handoff_depth: 0)
-    @session = session
-    @agent   = session.agent
-    @user    = user
-    @handoff_depth = handoff_depth
-    @chat    = build_chat
-  end
-
-  def run(user_message, &stream_block)
-    # 0. Budget check
-    BudgetEnforcer.check!(user: @user)
-
-    # 1. Check context budget, compact if needed
-    compact_if_needed!
-
-    # 2. Inject memories and context
-    inject_memory_context
-
-    # 3. Execute the agent loop
-    response = @chat.ask(user_message, &stream_block)
-
-    # 4. Post-processing: extract memories, record usage, update token counts
-    postprocess(response)
-
-    response
-  end
-
-  private
-
-  def build_chat
-    # Session messages are auto-loaded by ruby_llm's acts_as_chat persistence.
-    # build_chat connects to the session's persisted message history — prior
-    # messages are included in the LLM context automatically. Manual message
-    # injection via MemoryRetrievalService is only needed for memories, archives,
-    # daily logs, and user profile (cross-session context).
-
-    # BYOK: build isolated LLM context with user's API keys
-    ctx = LlmContextBuilder.build(user: @user)
-
-    model_id = @session.model_id || @agent.model_id
-    provider = @agent.provider&.to_sym
-
-    chat = provider ?
-      ctx.chat(model: model_id, provider: provider) :
-      ctx.chat(model: model_id)
-
-    chat.with_instructions(load_instructions)
-        .with_tools(*resolve_tools)
-        .with_temperature(@agent.temperature || 0.7)
-        .with_params(**@agent.params.symbolize_keys, **@agent.thinking_config)
-
-    # Wire up event handlers
-    chat.on_tool_call  { |tc| record_tool_call(tc) }
-    chat.on_tool_result { |r| record_tool_result(r) }
-    chat.on_end_message { |msg| update_token_counts(msg) }
-
-    # Enable server-side compaction for Responses API
-    if @agent.provider == "openai_responses"
-      chat.with_params(
-        context_management: [{ type: "compaction", compact_threshold: 150_000 }]
-      )
-    end
-
-    chat
-  end
-
-  def load_instructions
-    base = @agent.resolved_instructions
-
-    <<~PROMPT
-      #{base}
-
-      ## Current Context
-      User: #{@user.email} (ID: #{@user.id})
-      Channel: #{@session.channel.channel_type}
-      Session ID: #{@session.id}
-      Available agents for handoff: #{@agent.handoff_targets.join(', ')}
-    PROMPT
-  end
-
-  def resolve_tools
-    # Local tools (built-in)
-    local_tools = ToolRegistry.build(@agent.tool_names, user: @user, session: @session)
-
-    # MCP tools (user-configured external)
-    # Filtered by agent.enabled_mcps — see McpClientManager
-    mcp_tools = McpClientManager.tools_for(user: @user, agent: @agent)
-
-    # Handoff tool (if agent has targets and depth allows)
-    routing_tools = if @agent.handoff_targets.any? && @handoff_depth < MAX_HANDOFF_DEPTH
-      [HandoffTool.new(agent: @agent, session: @session, user: @user, depth: @handoff_depth)]
-    else
-      []
-    end
-
-    local_tools + mcp_tools + routing_tools
-  end
-
-  def inject_memory_context
-    retrieval = MemoryRetrievalService.new(session: @session, user: @user)
-    context = retrieval.build_context
-
-    # Inject memories as system message
-    if context[:memories].any?
-      memory_block = context[:memories].map { |m| "- #{m.content}" }.join("\n")
-      @chat.add_message(role: :system, content: "## User Memories\n#{memory_block}")
-    end
-
-    # Inject relevant archived conversation summaries
-    if context[:archives].any?
-      archive_block = context[:archives].map { |a| a.summary.truncate(500) }.join("\n---\n")
-      @chat.add_message(role: :system, content: "## Relevant Past Conversations\n#{archive_block}")
-    end
-
-    # Inject synthesized user profile
-    if context[:user_profile].present?
-      @chat.add_message(role: :system, content: "## User Profile\n#{context[:user_profile]}")
-    end
-
-    # Inject daily logs (today + yesterday)
-    if context[:daily_logs].any?
-      log_block = context[:daily_logs].map { |l| "### #{l.date}\n#{l.content}" }.join("\n")
-      @chat.add_message(role: :system, content: "## Daily Logs\n#{log_block}")
-    end
-  end
-
-  def compact_if_needed!
-    return if @session.context_window_usage < COMPACTION_THRESHOLD
-    CompactionService.new(@session).compact!
-  end
-
-  def postprocess(response)
-    # Record usage for billing
-    UsageRecorder.record(message: response, session: @session, user: @user)
-
-    # Extract memories asynchronously
-    MemoryExtractionJob.perform_later(@session.id, response.content, user_id: @user.id)
-
-    # Update session token counts (atomic to avoid race conditions)
-    delta = response.input_tokens.to_i + response.output_tokens.to_i
-    Session.where(id: @session.id).update_all(
-      "total_tokens = total_tokens + #{delta}, last_activity_at = '#{Time.current.iso8601}'"
-    )
-  end
-end
 ```
+AgentRuntime.run(user_message)
+  │
+  ├─ 0. BudgetEnforcer.check!(user:)
+  ├─ 1. compact_if_needed! (at 75% context window)
+  ├─ 2. inject_memory_context (memories, archives, profile, daily logs)
+  ├─ 3. @chat.ask(user_message, &stream_block)  ← ReAct loop
+  │       └─ LLM → tool call → execute → feed result → loop until text
+  └─ 4. postprocess: UsageRecorder, MemoryExtractionJob, update tokens
+```
+
+### Key Design Points
+
+| Constant | Value | Rationale |
+|----------|-------|-----------|
+| `MAX_TOOL_ITERATIONS` | 25 | Prevents runaway tool loops |
+| `COMPACTION_THRESHOLD` | 0.75 | Trigger compaction at 75% of context window |
+| `MAX_HANDOFF_DEPTH` | 3 | Prevents infinite A↔B handoff cycles |
+
+**Chat construction** (`build_chat`):
+- Session messages auto-loaded by ruby_llm's `acts_as_chat` persistence
+- BYOK: `LlmContextBuilder.build(user:)` creates isolated config with user's API keys
+- Tools resolved from: local tools (ToolRegistry) + MCP tools (McpClientManager) + HandoffTool
+- Event handlers wired for tool call recording, token counting
+- Responses API provider gets server-side compaction enabled
+
+**Instructions** (`load_instructions`): Combines `agent.resolved_instructions` with current context (user, channel, session, available handoff agents).
+
+**Memory injection** (`inject_memory_context`): Injects 4 types of cross-session context as system messages — memories (Layer 2), archived conversation summaries (Layer 3), synthesized user profile (Layer 5), and daily logs. All managed by `MemoryRetrievalService` within token budgets.
+
+**Post-processing**: Records usage for billing, extracts memories asynchronously via `MemoryExtractionJob`, and atomically updates session token counts.
+
+> **Initial implementation:** [RFC 002](../rfc-open/2026-03-29-simple-chat-conversation.md) implements `SimpleChatService` — a minimal runtime with no tools, no memory injection, no budget checks, no compaction. Just: build chat → ask → stream. The full `AgentRuntime` with tool loop and memory ships in later RFCs.
 
 ---
 
@@ -385,29 +197,24 @@ Messages are routed to agents based on channel, thread, and routing rules (schem
 
 Sessions are the unit of conversation continuity. Schema in [01 §5.4](./01-platform-and-infrastructure.md#54-channel-session--message-tables).
 
-```ruby
-# app/models/session.rb
-class Session < ApplicationRecord
-  acts_as_chat  # ruby_llm ActiveRecord integration
+### Session Model
 
-  belongs_to :user
-  belongs_to :agent
-  belongs_to :channel
-  has_many   :messages, dependent: :destroy
-  has_many   :notes,    dependent: :nullify
-  has_many   :memory_entries, dependent: :nullify
+The Session model uses ruby_llm's `acts_as_chat` for automatic message persistence and LLM context management.
 
-  scope :active, -> { where(status: "active") }
+| Association | Type | Description |
+|-------------|------|-------------|
+| `user` | belongs_to | Owner (required) |
+| `agent` | belongs_to | Which agent handles this session (required) |
+| `channel` | belongs_to | Which channel this session is on (deferred — see RFC 002) |
+| `messages` | has_many | Conversation messages |
+| `notes` | has_many | Agent-created notes (nullified on session delete) |
+| `memory_entries` | has_many | Extracted memories (nullified on session delete) |
 
-  def context_window_usage
-    total_tokens.to_f / context_window_size
-  end
+Key methods:
+- `context_window_usage` — Returns ratio of `total_tokens / context_window_size`. Used by compaction (§8).
+- `context_window_size` — Looks up the model's context window from ruby_llm's model registry.
 
-  def context_window_size
-    RubyLLM.models.find(model_id || agent.model_id).context_window
-  end
-end
-```
+> **Initial implementation:** [RFC 002](../rfc-open/2026-03-29-simple-chat-conversation.md) implements a minimal Session without `channel` association, notes, or memory entries. `context_window_usage` is deferred until compaction ships.
 
 ### Lifecycle
 
@@ -938,97 +745,39 @@ Sessions inactive >7 days are archived by `ArchiveStaleSessionsJob` (GoodJob cro
 
 Falcon's fiber-based concurrency is the critical enabler. Each LLM API call blocks for 5-60 seconds, but with Falcon, that blocking call yields its fiber, allowing thousands of concurrent streaming connections in a single process.
 
-```ruby
-# config/environments/production.rb
-config.active_support.isolation_level = :fiber  # Required for Falcon
+### Streaming Flow
 
-# Action Cable with Redis adapter for cross-process pub/sub
-config.action_cable.adapter = :redis
-config.action_cable.url = ENV["REDIS_URL"]
+```
+User sends message (REST POST)
+  │
+  ▼
+MessagesController enqueues ChatStreamJob (GoodJob :llm queue)
+  │
+  ▼ (GoodJob worker process — NOT Falcon)
+ChatStreamJob calls AgentRuntime.run(message) with streaming block
+  │
+  ├─ Each token chunk → ActionCable.server.broadcast via Redis pub/sub
+  │     → Falcon receives from Redis → pushes to WebSocket client
+  │
+  ├─ On complete → broadcast { type: "complete", content: full_text, message_id: ... }
+  │
+  └─ On error → broadcast { type: "error", message: "..." }
 ```
 
-```ruby
-# app/channels/session_channel.rb
-class SessionChannel < ApplicationCable::Channel
-  def subscribed
-    @session = current_user.sessions.find(params[:session_id])
-    stream_from "session_#{@session.id}"
-  rescue ActiveRecord::RecordNotFound
-    reject
-  end
+### Key Design Points
 
-  def receive(data)
-    ChatStreamJob.perform_later(@session.id, current_user.id, data["message"])
-  end
-end
-```
+- **LLM calls run in GoodJob workers** (separate process), not in Falcon. This avoids blocking the fiber reactor and provides crash recovery.
+- **ActionCable cross-process**: `ActionCable.server.broadcast` works from GoodJob because it publishes to Redis; Falcon subscribes and pushes to WebSocket clients.
+- **SessionChannel is output-only**: Messages are sent via REST POST, not `ActionCable.receive`. The channel only subscribes to a session's broadcast stream.
+- **Token events**: `{ type: "token", delta: "...", message_id: "..." }` — one per chunk.
+- **Complete event includes full content**: Prevents stale-closure bugs in frontend — the client can use `event.content` directly instead of relying on accumulated state.
+- **Falcon config**: `isolation_level = :fiber` in production, Redis adapter for ActionCable.
 
-```ruby
-# app/jobs/chat_stream_job.rb
-class ChatStreamJob < ApplicationJob
-  queue_as :llm
-
-  def perform(session_id, user_id, user_message)
-    session = Session.find(session_id)
-    user = User.find(user_id)
-    runtime = AgentRuntime.new(session: session, user: user)
-
-    runtime.run(user_message) do |chunk|
-      next unless chunk.content.present?
-      ActionCable.server.broadcast("session_#{session.id}", {
-        type: "token",
-        content: chunk.content,
-        message_id: session.messages.last&.id
-      })
-    end
-
-    ActionCable.server.broadcast("session_#{session.id}", {
-      type: "complete",
-      message_id: session.messages.last&.id
-    })
-  rescue BudgetEnforcer::BudgetExceededError => e
-    ActionCable.server.broadcast("session_#{session.id}", {
-      type: "error", message: e.message
-    })
-  rescue => e
-    ActionCable.server.broadcast("session_#{session.id}", {
-      type: "error", message: "Something went wrong. Please try again."
-    })
-    Rails.logger.error "[ChatStream] Error: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
-  end
-end
-```
+> **Initial implementation:** [RFC 002](../rfc-open/2026-03-29-simple-chat-conversation.md) implements the full streaming flow with `SimpleChatService` (no tools/memory). The `complete` event always includes `content` to fix the frontend stale-closure bug identified during RFC design.
 
 ### Parallel Agent Execution
 
-For fan-out to multiple agents (e.g., orchestrator querying specialists), Falcon's fibers enable true concurrent execution:
-
-```ruby
-# app/services/parallel_agent_executor.rb
-require "async"
-require "async/semaphore"
-
-class ParallelAgentExecutor
-  def initialize(max_concurrent: 5)
-    @semaphore = Async::Semaphore.new(max_concurrent)
-  end
-
-  def execute_parallel(agent_slugs, prompt:, user:, channel:)
-    Async do
-      agent_slugs.map do |slug|
-        @semaphore.async do
-          session = SessionResolver.resolve(
-            user: user, agent_slug: slug, channel_type: channel.channel_type,
-            external_id: channel.external_id
-          )
-          runtime = AgentRuntime.new(session: session, user: user)
-          { agent: slug, result: runtime.run(prompt) }
-        end
-      end.map(&:wait)
-    end.wait
-  end
-end
-```
+For fan-out to multiple agents (e.g., orchestrator querying specialists), Falcon's fibers enable true concurrent execution. A `ParallelAgentExecutor` service uses `Async::Semaphore` (max 5 concurrent) to dispatch multiple `AgentRuntime.run` calls as fibers, resolving sessions per-agent and collecting results. This is deferred until multi-agent routing ships.
 
 ---
 
