@@ -1,3 +1,19 @@
+---
+type: prd
+title: Platform & Infrastructure
+domain: platform
+created: 2026-03-28
+updated: 2026-03-30
+status: canonical
+depends_on:
+  - prd/02-integrations-and-channels
+  - prd/03-agentic-system
+  - prd/04-billing-and-operations
+implemented_by:
+  - rfc/2026-03-29-simple-chat-conversation
+  - rfc/2026-03-30-workspace-isolation
+---
+
 # DailyWerk — Platform & Infrastructure
 
 > Canonical reference for stack decisions, tenant isolation, database schema, and deployment.

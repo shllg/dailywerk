@@ -1,3 +1,16 @@
+---
+type: prd
+title: Billing & Operations
+domain: billing
+created: 2026-03-28
+updated: 2026-03-28
+status: canonical
+depends_on:
+  - prd/01-platform-and-infrastructure
+  - prd/02-integrations-and-channels
+  - prd/03-agentic-system
+---
+
 # DailyWerk — Billing & Operations
 
 > Payments, credit system, BYOK, MCP, cost tracking, provider management, and background job configuration.

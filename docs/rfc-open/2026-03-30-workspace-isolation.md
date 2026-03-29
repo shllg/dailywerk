@@ -1,7 +1,15 @@
-# RFC 002: Workspace Isolation
+---
+type: rfc
+title: Workspace Isolation
+created: 2026-03-30
+updated: 2026-03-30
+status: draft
+implements:
+  - prd/01-platform-and-infrastructure
+phase: 1
+---
 
-**Status:** Draft
-**Created:** 2026-03-30
+# RFC 002: Workspace Isolation
 
 ## Context
 

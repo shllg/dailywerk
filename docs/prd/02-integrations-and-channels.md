@@ -1,3 +1,16 @@
+---
+type: prd
+title: Integrations & Channels
+domain: integrations
+created: 2026-03-28
+updated: 2026-03-28
+status: canonical
+depends_on:
+  - prd/01-platform-and-infrastructure
+  - prd/03-agentic-system
+  - prd/04-billing-and-operations
+---
+
 # DailyWerk — Integrations & Channels
 
 > Everything that connects DailyWerk to external systems: messaging, email, calendar, vault sync, tasks, search.

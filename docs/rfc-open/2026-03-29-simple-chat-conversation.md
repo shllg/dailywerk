@@ -1,7 +1,17 @@
-# RFC: Simple Chat Conversation
+---
+type: rfc
+title: Simple Chat Conversation
+created: 2026-03-29
+updated: 2026-03-30
+status: draft
+implements:
+  - prd/03-agentic-system
+depends_on:
+  - rfc/2026-03-30-workspace-isolation
+phase: 1
+---
 
-**Status:** Draft
-**Created:** 2026-03-29
+# RFC: Simple Chat Conversation
 
 ## Context
 

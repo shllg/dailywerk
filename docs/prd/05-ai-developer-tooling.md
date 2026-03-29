@@ -1,3 +1,14 @@
+---
+type: prd
+title: AI Developer Tooling
+domain: tooling
+created: 2026-03-29
+updated: 2026-03-30
+status: canonical
+implemented_by:
+  - rfc/2026-03-29-ai-tooling-phase2
+---
+
 # PRD 05: AI Developer Tooling
 
 ## Goal

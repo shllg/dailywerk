@@ -1,7 +1,15 @@
-# RFC 001: AI Developer Tooling — Phase 2 Incremental Configuration
+---
+type: rfc
+title: "AI Developer Tooling — Phase 2 Incremental Configuration"
+created: 2026-03-29
+updated: 2026-03-30
+status: draft
+implements:
+  - prd/05-ai-developer-tooling
+phase: 2
+---
 
-**Status:** Draft
-**Created:** 2026-03-29
+# RFC 001: AI Developer Tooling — Phase 2 Incremental Configuration
 
 ## Context
 

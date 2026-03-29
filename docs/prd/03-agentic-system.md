@@ -1,3 +1,18 @@
+---
+type: prd
+title: Agentic System
+domain: agents
+created: 2026-03-28
+updated: 2026-03-30
+status: canonical
+depends_on:
+  - prd/01-platform-and-infrastructure
+  - prd/02-integrations-and-channels
+  - prd/04-billing-and-operations
+implemented_by:
+  - rfc/2026-03-29-simple-chat-conversation
+---
+
 # DailyWerk — Agentic System
 
 > The brain: agents, runtime, memory, tools, sessions, streaming.
