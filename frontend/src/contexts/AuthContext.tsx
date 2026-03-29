@@ -97,6 +97,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [logout, syncFromStorage])
 
+  // TODO: [WorkOS] Replace with a redirect to the WorkOS authorization URL.
+  // The rest of this context (token storage, Bearer header, logout) stays identical.
   const login = useCallback(async (email: string) => {
     const response = await fetch('/api/v1/sessions', {
       method: 'POST',
