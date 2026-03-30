@@ -20,7 +20,7 @@ implemented_by:
 > For channel adapters and vault sync: see [02-integrations-and-channels.md](./02-integrations-and-channels.md).
 > For BYOK, MCP, cost tracking, and GoodJob config: see [04-billing-and-operations.md](./04-billing-and-operations.md).
 
-**Implementation status:** [RFC 002](../rfc-open/2026-03-29-simple-chat-conversation.md) implements the first slice — simple chat with a single agent (no tools, no memory, no handoffs). Sections below describe the full target architecture.
+**Implementation status:** [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) implements the first slice — simple chat with a single agent (no tools, no memory, no handoffs). Sections below describe the full target architecture.
 
 ---
 
@@ -88,7 +88,7 @@ Key behaviors:
 - `tool_classes` resolves tool name strings to Ruby classes via `ToolRegistry`.
 - `handoff_agents` resolves `handoff_targets` slugs to active Agent records for the same user.
 
-> **Initial implementation:** [RFC 002](../rfc-open/2026-03-29-simple-chat-conversation.md) implements a minimal Agent model where `resolved_instructions` simply returns `instructions.to_s`. Full soul/identity/ERB template support ships in a later RFC.
+> **Initial implementation:** [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) implements a minimal Agent model where `resolved_instructions` simply returns `instructions.to_s`. Full soul/identity/ERB template support ships in a later RFC.
 
 ### Admin / Config Tools (Master Chat)
 
@@ -147,7 +147,7 @@ AgentRuntime.run(user_message)
 
 **Post-processing**: Records usage for billing, extracts memories asynchronously via `MemoryExtractionJob`, and atomically updates session token counts.
 
-> **Initial implementation:** [RFC 002](../rfc-open/2026-03-29-simple-chat-conversation.md) implements `SimpleChatService` — a minimal runtime with no tools, no memory injection, no budget checks, no compaction. Just: build chat → ask → stream. The full `AgentRuntime` with tool loop and memory ships in later RFCs.
+> **Initial implementation:** [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) implements `SimpleChatService` — a minimal runtime with no tools, no memory injection, no budget checks, no compaction. Just: build chat → ask → stream. The full `AgentRuntime` with tool loop and memory ships in later RFCs.
 
 ---
 
@@ -229,7 +229,7 @@ Key methods:
 - `context_window_usage` — Returns ratio of `total_tokens / context_window_size`. Used by compaction (§8).
 - `context_window_size` — Looks up the model's context window from ruby_llm's model registry.
 
-> **Initial implementation:** [RFC 002](../rfc-open/2026-03-29-simple-chat-conversation.md) implements a minimal Session without `channel` association, notes, or memory entries. `context_window_usage` is deferred until compaction ships.
+> **Initial implementation:** [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) implements a minimal Session without `channel` association, notes, or memory entries. `context_window_usage` is deferred until compaction ships.
 
 ### Lifecycle
 
@@ -788,7 +788,7 @@ ChatStreamJob calls AgentRuntime.run(message) with streaming block
 - **Complete event includes full content**: Prevents stale-closure bugs in frontend — the client can use `event.content` directly instead of relying on accumulated state.
 - **Falcon config**: `isolation_level = :fiber` in production, Redis adapter for ActionCable (Valkey-compatible).
 
-> **Initial implementation:** [RFC 002](../rfc-open/2026-03-29-simple-chat-conversation.md) implements the full streaming flow with `SimpleChatService` (no tools/memory). The `complete` event always includes `content` to fix the frontend stale-closure bug identified during RFC design.
+> **Initial implementation:** [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) implements the full streaming flow with `SimpleChatService` (no tools/memory). The `complete` event always includes `content` to fix the frontend stale-closure bug identified during RFC design.
 
 ### Parallel Agent Execution
 

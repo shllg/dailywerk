@@ -139,7 +139,7 @@ Workspace isolation is defense-in-depth:
 
 RLS still matters even with Rails scoping. If a query bypasses the concern with raw SQL or `unscoped`, PostgreSQL should remain the final barrier.
 
-The concrete implementation pattern for auth, request/job scoping, and connection reset lives in [RFC 002: Workspace Isolation](../rfc-open/2026-03-30-workspace-isolation.md).
+The concrete implementation pattern for auth, request/job scoping, and connection reset lives in [RFC 002: Workspace Isolation](../rfc-done/2026-03-30-workspace-isolation.md).
 
 PRD-level invariants:
 
@@ -195,7 +195,7 @@ end
 
 ### 5.2 Core Tables
 
-The implemented identity and ownership tables are specified in [RFC 002: Workspace Isolation](../rfc-open/2026-03-30-workspace-isolation.md).
+The implemented identity and ownership tables are specified in [RFC 002: Workspace Isolation](../rfc-done/2026-03-30-workspace-isolation.md).
 
 | Table | Purpose | Notes |
 |-------|---------|-------|
@@ -206,7 +206,7 @@ The implemented identity and ownership tables are specified in [RFC 002: Workspa
 
 ### 5.3 Agent Tables
 
-For agent model details and runtime behavior, see [03 §2](./03-agentic-system.md#2-agent-model). For initial minimal schema, see [RFC 002 §2.1](../rfc-open/2026-03-29-simple-chat-conversation.md#21-agents-table-minimal).
+For agent model details and runtime behavior, see [03 §2](./03-agentic-system.md#2-agent-model). For initial minimal schema, see [RFC 002 §2.1](../rfc-done/2026-03-29-simple-chat-conversation.md#21-agents-table-minimal).
 
 #### `agents` — Full Target Schema
 
@@ -243,7 +243,7 @@ Routes inbound messages to agents based on channel, account, and thread. Fields:
 
 ### 5.4 Channel, Session & Message Tables
 
-For session lifecycle and compaction details, see [03 §5](./03-agentic-system.md#5-session-management) and [03 §8](./03-agentic-system.md#8-compaction). For initial minimal schema, see [RFC 002 §2](../rfc-open/2026-03-29-simple-chat-conversation.md#2-database-schema).
+For session lifecycle and compaction details, see [03 §5](./03-agentic-system.md#5-session-management) and [03 §8](./03-agentic-system.md#8-compaction). For initial minimal schema, see [RFC 002 §2](../rfc-done/2026-03-29-simple-chat-conversation.md#2-database-schema).
 
 #### `channels` — Messaging Endpoints
 
@@ -717,7 +717,7 @@ Docker Compose for MVP. Single server for first 10 test users (keep all vaults w
 1. **Vault cold-start latency** — Large vaults (5-10GB) re-checkout from S3 could take minutes. MVP: keep all test users warm, monitor. Solve when real usage data exists.
 2. **Multi-vault pricing** — Additional vaults as paid feature. Pricing TBD. Architecture supports it (vaults table, per-vault encryption, per-agent vault_access).
 3. **Shared resources** — Agent sharing, vault sharing. Deferred to post-MVP. Schema supports it via `agent_shares` pattern (§4.4).
-4. **Frontend architecture** — Vite + React + TypeScript + Tailwind + DaisyUI chosen. [RFC 002](../rfc-open/2026-03-29-simple-chat-conversation.md) defines the initial chat UI, app shell with top bar, and API contract. Component patterns to be codified after more features ship.
+4. **Frontend architecture** — Vite + React + TypeScript + Tailwind + DaisyUI chosen. [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) defines the initial chat UI, app shell with top bar, and API contract. Component patterns to be codified after more features ship.
 5. **Observability** — Logging, metrics, alerting, health checks, session replay for debugging. Needs dedicated design.
 6. **GDPR / data deletion** — Define `UserDeletionService` for hard-delete of all user data across PG, S3, Valkey, and vault checkouts.
 7. **SPA authentication** — React SPA and Rails API must share a root domain for HttpOnly/Secure/SameSite cookie-based auth. JWT in localStorage is an XSS vector.
