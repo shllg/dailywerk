@@ -24,6 +24,7 @@ export function ChatContainer({ token }: ChatContainerProps) {
     activeAgent,
     sendMessage,
     setMessages,
+    setActiveAgent,
   } = useActionCableChat(sessionId, token, agentName)
   const { ref, scrollIfAtBottom, scrollToBottom, isAtBottom } =
     useAutoScroll<HTMLDivElement>()
@@ -31,13 +32,13 @@ export function ChatContainer({ token }: ChatContainerProps) {
   useEffect(() => {
     let cancelled = false
 
-    setIsLoading(true)
     fetchChat()
       .then((chat) => {
         if (cancelled) return
 
         setSessionId(chat.sessionId)
         setAgentName(chat.agent.name)
+        setActiveAgent(chat.agent.name)
         setMessages(
           chat.messages.map((message) =>
             message.role === 'assistant'
@@ -51,6 +52,7 @@ export function ChatContainer({ token }: ChatContainerProps) {
         if (cancelled) return
         setSessionId(null)
         setAgentName(null)
+        setActiveAgent(null)
         setMessages([])
         setError(err.message)
       })
@@ -63,7 +65,7 @@ export function ChatContainer({ token }: ChatContainerProps) {
     return () => {
       cancelled = true
     }
-  }, [reloadCount, setMessages, token])
+  }, [reloadCount, setActiveAgent, setMessages, token])
 
   useEffect(() => {
     scrollIfAtBottom()
@@ -89,7 +91,11 @@ export function ChatContainer({ token }: ChatContainerProps) {
           </p>
           <button
             type="button"
-            onClick={() => setReloadCount((count) => count + 1)}
+            onClick={() => {
+              setError(null)
+              setIsLoading(true)
+              setReloadCount((count) => count + 1)
+            }}
             className="mt-5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-white/20 hover:bg-white/10"
           >
             Retry

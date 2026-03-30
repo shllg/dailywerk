@@ -29,6 +29,7 @@ export interface UseActionCableChatReturn {
   isStreaming: boolean
   activeAgent: string | null
   sendMessage: (content: string) => void
+  setActiveAgent: (agentName: string | null) => void
   setMessages: Dispatch<SetStateAction<Message[]>>
 }
 
@@ -51,6 +52,11 @@ export function useActionCableChat(
   const activeAgentRef = useRef<string | null>(defaultAgentName)
   const thinkingRef = useRef('')
 
+  const syncActiveAgent = useCallback((agentName: string | null) => {
+    activeAgentRef.current = agentName
+    setActiveAgent(agentName)
+  }, [])
+
   const resetStreamingState = useCallback(() => {
     setStreamingContent('')
     setStreamingMessageId(null)
@@ -59,11 +65,6 @@ export function useActionCableChat(
     streamingMessageIdRef.current = null
     thinkingRef.current = ''
   }, [])
-
-  useEffect(() => {
-    activeAgentRef.current = defaultAgentName
-    setActiveAgent(defaultAgentName)
-  }, [defaultAgentName])
 
   useEffect(() => {
     if (!sessionId || !token) return
@@ -150,8 +151,7 @@ export function useActionCableChat(
 
             case 'agent_handoff': {
               const newAgent = event.agent as string
-              activeAgentRef.current = newAgent
-              setActiveAgent(newAgent)
+              syncActiveAgent(newAgent)
               setMessages((prev) => [
                 ...prev,
                 {
@@ -190,7 +190,7 @@ export function useActionCableChat(
       subscription.unsubscribe()
       consumer.disconnect()
     }
-  }, [resetStreamingState, sessionId, token])
+  }, [resetStreamingState, sessionId, syncActiveAgent, token])
 
   const sendMessage = useCallback(
     (content: string) => {
@@ -235,6 +235,7 @@ export function useActionCableChat(
     isStreaming,
     activeAgent,
     sendMessage,
+    setActiveAgent: syncActiveAgent,
     setMessages,
   }
 }

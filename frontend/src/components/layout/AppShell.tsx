@@ -1,5 +1,5 @@
-import { useAuth } from '../../contexts/AuthContext'
 import { ChatContainer } from '../chat/ChatContainer'
+import { useAuth } from '../../hooks/useAuth'
 
 export function AppShell() {
   const { logout, token, user, workspace } = useAuth()
