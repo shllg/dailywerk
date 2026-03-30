@@ -3,12 +3,18 @@ type: prd
 title: Integrations & Channels
 domain: integrations
 created: 2026-03-28
-updated: 2026-03-28
+updated: 2026-03-31
 status: canonical
 depends_on:
   - prd/01-platform-and-infrastructure
   - prd/03-agentic-system
   - prd/04-billing-and-operations
+implemented_by:
+  - rfc/2026-03-30-messaging-gateway-and-bridge-protocol
+  - rfc/2026-03-30-signal-bridge-npm-package
+  - rfc/2026-03-31-google-integration
+  - rfc/2026-03-31-inbound-email-processing
+  - rfc/2026-03-31-imap-smtp-integration
 ---
 
 # DailyWerk — Integrations & Channels
@@ -167,15 +173,33 @@ end
 
 ## 3. Email Integration
 
-### Gmail API (primary path)
+DailyWerk provides three email paths, ordered by user effort:
 
-OAuth 2.0 with separate flow from WorkOS. Full access scopes: `gmail.readonly`, `gmail.send`, `gmail.modify`, `gmail.labels`. Agent can read, send, label, archive, star, and manage emails. Push notifications via Google Pub/Sub. `users.watch()` renewed every 7 days (GoodJob cron — see [04 §8](./04-billing-and-operations.md#8-goodjob-configuration)).
+### Inbound Email Forwarding (primary, zero-setup)
 
-### SMTP/IMAP (alternative path, post-MVP)
+Each workspace gets a unique inbound email address (`{workspace_token}@in.dailywerk.com`). Users forward content to the address; the agent processes it. Sender allowlist prevents abuse. No credentials, no OAuth, no setup beyond knowing the address. Works with every email provider.
 
-For users not on Gmail. Standard IMAP polling for inbox monitoring, SMTP for sending. Credentials stored encrypted (see [01 §5.9](./01-platform-and-infrastructure.md#59-integration-tables)). IMAP IDLE for near-realtime push where supported. Broader provider support (Outlook, ProtonMail Bridge, self-hosted).
+See [RFC: Inbound Email Processing](../rfc-open/2026-03-31-inbound-email-processing.md).
 
-**Design note**: `EmailProcessor` worker must be provider-agnostic from the start — abstract over Gmail API vs IMAP/SMTP behind a common interface.
+### IMAP/SMTP (active email access, user-provided credentials)
+
+For agent-initiated email operations (read inbox, send as user). User provides IMAP/SMTP server credentials (host, port, username, password/app-password). Provider-agnostic — works with Gmail (app passwords), Outlook, Fastmail, ProtonMail Bridge, self-hosted mail servers. Credentials stored encrypted (see [01 §5.9](./01-platform-and-infrastructure.md#59-integration-tables)).
+
+See [RFC: IMAP/SMTP Integration](../rfc-open/2026-03-31-imap-smtp-integration.md).
+
+### Gmail API via BYOA OAuth (power users)
+
+Users create their own Google Cloud project and supply OAuth credentials to DailyWerk. This bypasses Google's CASA verification requirement (which blocks DailyWerk-managed Gmail OAuth). Full Gmail API access: read, send, label, archive, search. Push notifications via Google Pub/Sub.
+
+See [RFC: Google Integration](../rfc-open/2026-03-31-google-integration.md).
+
+### Gmail API via DailyWerk-Managed OAuth (future)
+
+Deferred until user base justifies the annual CASA security assessment ($540–4,500/year). One-click Gmail connection without user-side GCP setup.
+
+See [PRD 06: Gmail Direct Integration](./06-gmail-direct-integration.md).
+
+**Design note**: `EmailService` provides a provider-agnostic interface — agent tools (`email_read`, `email_send`, etc.) work identically regardless of whether the backend is IMAP/SMTP or Gmail API.
 
 ---
 
@@ -223,7 +247,9 @@ Users may have multiple vaults (e.g., personal, work). Additional pricing TBD. E
 
 ### Google Calendar API (primary)
 
-OAuth 2.0, separate flow from WorkOS. Bidirectional sync. DailyWerk stores its own calendar entries in PostgreSQL (see [01 §5.7](./01-platform-and-infrastructure.md#57-task--calendar-tables)). User-configurable rules per agent: which Google Calendar to target (personal, work, shared), default duration, reminders, color coding.
+OAuth 2.0 via DailyWerk-managed credentials (sensitive scopes only — no CASA required). Bidirectional sync with incremental updates via sync tokens and push notifications via HTTPS webhooks. DailyWerk stores its own calendar entries in PostgreSQL (see [01 §5.7](./01-platform-and-infrastructure.md#57-task--calendar-tables)). User-configurable rules per agent: which Google Calendar to target (personal, work, shared), default duration, reminders, color coding.
+
+See [RFC: Google Integration](../rfc-open/2026-03-31-google-integration.md).
 
 ### CalDAV Export (read-only, for non-Google users)
 
@@ -309,7 +335,7 @@ pgvector handles ~1M vectors with HNSW. Per-user vault = <50k chunks typically. 
 
 ## 8. Open Questions
 
-1. **SMTP/IMAP implementation** — Post-MVP but architecture should not preclude it. EmailProcessor worker needs to be provider-agnostic from the start.
-2. **CalDAV write support** — Read-only .ics feed for MVP. Full CalDAV server for bidirectional sync is significant effort (RFC 4791). Evaluate `cervicale` gem or custom Rack middleware when demand exists.
-3. **External sync conflict resolution** — Last-write-wins with external-preference is the MVP strategy. May need user-facing conflict UI for edge cases (agent and user both modified same event simultaneously).
-4. **Webhook idempotency** — Inbound bridge webhooks need idempotency keys (message dedup by `event_id` or content hash). Stripe webhooks need `processed_stripe_events` table — see [04 §1](./04-billing-and-operations.md#1-payments--stripe-integration).
+1. **CalDAV write support** — Read-only .ics feed for MVP. Full CalDAV server for bidirectional sync is significant effort (RFC 4791). Evaluate `cervicale` gem or custom Rack middleware when demand exists.
+2. **External sync conflict resolution** — Last-write-wins with external-preference is the MVP strategy. May need user-facing conflict UI for edge cases (agent and user both modified same event simultaneously).
+3. **Webhook idempotency** — Inbound bridge webhooks need idempotency keys (message dedup by `event_id` or content hash). Stripe webhooks need `processed_stripe_events` table — see [04 §1](./04-billing-and-operations.md#1-payments--stripe-integration).
+4. **Inbound email service selection** — Postmark vs Mailgun for receiving forwarded emails. Both work; Postmark is simpler. See [RFC: Inbound Email Processing](../rfc-open/2026-03-31-inbound-email-processing.md).
