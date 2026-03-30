@@ -89,7 +89,9 @@ Trying to force those flows into one universal API would either make the protoco
 
 ## Bridge Model
 
-Each `bridges` row represents exactly one DailyWerk bridge integration for one workspace user and one external account.
+Each `bridges` row represents one workspace-owned bridge deployment associated with one external account.
+
+`bridge_id` is the deployment and provenance identifier, not the logical conversation identity.
 
 ### V1 Assumptions
 
@@ -99,6 +101,8 @@ Each `bridges` row represents exactly one DailyWerk bridge integration for one w
 - one bridge can serve multiple threads/conversations for that one account
 
 Multi-account bridge instances are deferred because they complicate key management, health reporting, and per-user billing without helping the MVP.
+
+The current platform PRD still shows `bridges.user_id`. Before external channels ship, that table should be aligned with the workspace isolation direction so bridge ownership is scoped by workspace, not by direct user ownership alone.
 
 ## Protocol Versioning
 
@@ -114,6 +118,22 @@ Rules:
 
 ## Canonical Entities
 
+### Account
+
+```json
+{
+  "provider_account_id": "signal:+4915112345678",
+  "display_name": "DailyWerk Signal Bridge"
+}
+```
+
+Rules:
+
+- `provider_account_id` is required
+- it is the stable external account key used for routing and migration continuity
+- it may be opaque and must not be assumed to be a phone number
+- bridge replacement must preserve the same logical `provider_account_id`
+
 ### Participant
 
 Bridge Protocol must not assume a phone number exists. Signal's upstream client already supports Service IDs, ACI/PNI identifiers, and usernames in addition to phone numbers.
@@ -123,8 +143,7 @@ Bridge Protocol must not assume a phone number exists. Signal's upstream client 
   "provider_id": "d6e0c5c6-5f7b-4a5f-8e9d-1c2b3a4d5e6f",
   "phone_number": "+4915112345678",
   "username": "u:sascha.123",
-  "display_name": "Sascha",
-  "device_id": 2
+  "display_name": "Sascha"
 }
 ```
 
@@ -134,6 +153,7 @@ Rules:
 - `phone_number` is optional
 - `username` is optional
 - bridges should include every stable identifier they know
+- provider-specific per-device details stay in `raw`, not in the canonical participant shape
 
 ### Conversation
 
@@ -239,10 +259,11 @@ The bridge advertises optional support through `/health.capabilities`.
 ### Inbound Semantics
 
 - Core must persist the raw payload and normalized envelope before side effects
-- `event_id` must be unique per bridge
+- `event_id` must identify the logical upstream event, not merely one bridge delivery attempt
 - duplicate `event_id` values are treated as successful no-ops
 - `raw` is mandatory and stored for debugging even when a normalized field is missing
 - inbound handlers must be fast and enqueue downstream work instead of running the agent inline
+- bridge replacement, failover, or self-hosted-to-managed migration must not change `event_id` for the same upstream message event
 
 ### Response Codes
 
@@ -282,13 +303,16 @@ Bridge retry rule:
   "content": {
     "type": "text",
     "text": "hello back",
-    "attachments": []
+    "attachments": [
+      {
+        "mime_type": "image/jpeg",
+        "filename": "photo.jpg",
+        "download_url": "https://api.dailywerk.com/bridge-media/att_01JQXYZ"
+      }
+    ]
   },
   "reply_to": {
     "provider_message_id": "1743336000000"
-  },
-  "metadata": {
-    "session_id": "ses_01JQXYZ"
   }
 }
 ```
@@ -366,15 +390,18 @@ Core maps this into the existing `bridges.status` and `last_health_check_at` fie
 
 Core resolves sessions. Bridges never choose an agent session.
 
-The session key is:
+Core first resolves an agent binding from channel + account + thread using the `agent_channel_bindings` model described in PRD 03 or an equivalent resolver.
 
-`workspace + agent + gateway/channel + bridge + conversation.provider_thread_id`
+The session key is then:
+
+`workspace + resolved_agent + channel + account.provider_account_id + conversation.provider_thread_id`
 
 Rules:
 
-- DMs reuse one ongoing session per bridge conversation
+- DMs reuse one ongoing session per logical bridge conversation
 - group chats isolate by `provider_thread_id`
 - the bridge payload may include sender metadata, but it does not override workspace ownership
+- bridge deployment changes must not fork sessions if `channel + account + thread` are unchanged
 - built-in web chat remains a direct channel and does not use the HTTP bridge protocol
 
 ## Security
@@ -415,9 +442,9 @@ Why not inline base64 in inbound events:
 
 Outbound media flow:
 
-1. Core sends `media_url`
-2. bridge downloads the file
-3. bridge converts it into the provider's upload/send format
+1. Core sends one or more `content.attachments[*].download_url` values
+2. bridge downloads each file
+3. bridge converts the files into the provider's upload/send format
 
 ## Observability And Auditing
 

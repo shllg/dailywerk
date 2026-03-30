@@ -30,11 +30,17 @@ Upstream research changes the design in two important ways:
 1. official `signal-cli` already exposes a daemon with JSON-RPC and HTTP support, so DailyWerk does not need to invent its own control interface
 2. `signal-cli` supports **linked device** mode, so "dedicated phone number only" is too strict as a default assumption
 
+This RFC intentionally updates the self-hosted Signal assumption from PRD 02. The researched change is:
+
+- self-hosted should default to linked-device onboarding
+- dedicated-number registration remains supported for explicit headless setups
+- managed Signal remains a product goal and should consume the same package/runtime boundary rather than a different stack
+
 ## Decision
 
 Publish a Node 22 + TypeScript package named **`@dailywerk/signal-bridge`**.
 
-The package is **library-first**, with a thin CLI for self-hosted operators.
+The package is **library-first**, with a thin CLI for self-hosted operators and a reusable provisioner/runtime boundary that DailyWerk can drive from the dashboard for managed or guided self-hosted setups.
 
 Primary design choices:
 
@@ -227,14 +233,14 @@ Rules:
 
 Flow:
 
-1. operator runs `dailywerk-signal-bridge link start`
+1. DailyWerk dashboard or CLI starts a link session
 2. provisioner requests a `deviceLinkUri`
-3. CLI renders QR or prints the deep link
+3. UI or CLI renders QR or prints the deep link
 4. user links the bridge from the Signal mobile app
-5. operator runs `dailywerk-signal-bridge link finish`
+5. dashboard or CLI completes `link finish`
 6. runtime switches into normal single-account mode
 
-This should be the default in docs and UX.
+This should be the default in docs and UX for self-hosted setups.
 
 ### Fallback: Direct Registration
 
@@ -315,7 +321,7 @@ Inbound flow:
 
 Outbound flow:
 
-1. Core sends `media_url`
+1. Core sends `content.attachments[*].download_url`
 2. runtime downloads the file to a temp path
 3. transport sends it through `signal-cli`
 4. temp file is removed after send or retry exhaustion
@@ -332,10 +338,11 @@ Rules:
 - the runtime records pending deliveries locally before posting to Core
 - successful Core `202` responses clear the local pending record
 - reconnects replay any undelivered pending events first
+- bridge redeployments must preserve logical identity for the same Signal account and thread
 
 Suggested `event_id` basis:
 
-`bridge_id + account + sender.provider_id + provider_message_id + event_type`
+`channel + logical_account_id + providerThreadId + providerMessageId + eventType`
 
 ### Outbound Path
 
@@ -391,7 +398,7 @@ CLI goals:
 - no plaintext logging of message content by default
 - signed requests for managed mode remain a runtime concern layered above the package
 - attachment endpoints require bridge auth or short-lived signed URLs
-- SSRF-safe download policy for outbound `media_url`
+- SSRF-safe download policy for outbound attachment URLs
 
 ## Docker Image Relationship
 
@@ -428,13 +435,14 @@ Rejected because shipping native binaries and Java runtime concerns inside the p
 
 ### Phase 2
 
+- dashboard-driven self-hosted onboarding on top of the same provisioner
+- managed-mode helpers and image integration
 - rest-api compatibility transport
 - richer receipts and typing support
 - better operator diagnostics
 
 ### Phase 3
 
-- managed-mode helpers
 - pooled/shared runtime support
 
 ## References
