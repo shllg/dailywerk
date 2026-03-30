@@ -2,6 +2,17 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
+vi.mock('./services/cable', () => ({
+  createAuthenticatedConsumer: () => ({
+    disconnect: vi.fn(),
+    subscriptions: {
+      create: () => ({
+        unsubscribe: vi.fn(),
+      }),
+    },
+  }),
+}))
+
 describe('App', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -22,7 +33,7 @@ describe('App', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders the health dashboard when a session is stored', async () => {
+  it('renders the single chat view when a session is stored', async () => {
     localStorage.setItem('auth_token', 'test-token')
     localStorage.setItem(
       'auth_user',
@@ -46,10 +57,19 @@ describe('App', () => {
         ok: true,
         status: 200,
         json: async () => ({
-          status: 'ok',
-          timestamp: '2026-03-30T10:00:00Z',
-          version: '8.1.3',
-          ruby: '4.0.2',
+          session_id: 'session-1',
+          agent: {
+            slug: 'main',
+            name: 'DailyWerk',
+          },
+          messages: [
+            {
+              id: 'message-1',
+              role: 'assistant',
+              content: 'How can I help?',
+              timestamp: '2026-03-30T10:00:00Z',
+            },
+          ],
         }),
       }),
     )
@@ -59,7 +79,7 @@ describe('App', () => {
     expect(screen.getByText('Personal')).toBeInTheDocument()
 
     await waitFor(() => {
-      expect(screen.getByText('ok')).toBeInTheDocument()
+      expect(screen.getByText('How can I help?')).toBeInTheDocument()
     })
   })
 })

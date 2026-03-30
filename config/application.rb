@@ -6,6 +6,10 @@ require "rails/all"
 # you've limited to :test, :development, or :production.
 Bundler.require(*Rails.groups)
 
+RubyLLM.configure do |config|
+  config.use_new_acts_as = true
+end
+
 module Dailywerk
   class Application < Rails::Application
     config.load_defaults 8.1

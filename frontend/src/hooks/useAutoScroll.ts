@@ -16,7 +16,11 @@ export function useAutoScroll<T extends HTMLElement>() {
   const scrollToBottom = useCallback(() => {
     const el = ref.current
     if (el) {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+      if (typeof el.scrollTo === 'function') {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+      } else {
+        el.scrollTop = el.scrollHeight
+      }
     }
   }, [])
 

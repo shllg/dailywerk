@@ -67,6 +67,27 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
+-- Name: agents; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.agents (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    workspace_id uuid NOT NULL,
+    slug character varying NOT NULL,
+    name character varying NOT NULL,
+    model_id character varying DEFAULT 'gpt-5.4'::character varying NOT NULL,
+    instructions text,
+    temperature double precision DEFAULT 0.7,
+    is_default boolean DEFAULT false NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+ALTER TABLE ONLY public.agents FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: ar_internal_metadata; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -181,12 +202,102 @@ CREATE TABLE public.good_jobs (
 
 
 --
+-- Name: messages; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.messages (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    session_id uuid NOT NULL,
+    workspace_id uuid NOT NULL,
+    model_id uuid,
+    role character varying NOT NULL,
+    content text,
+    content_raw jsonb,
+    thinking_text text,
+    thinking_signature text,
+    thinking_tokens integer,
+    input_tokens integer,
+    output_tokens integer,
+    cached_tokens integer,
+    cache_creation_tokens integer,
+    response_id character varying,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL,
+    tool_call_id uuid
+);
+
+ALTER TABLE ONLY public.messages FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ruby_llm_models; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ruby_llm_models (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    model_id character varying NOT NULL,
+    name character varying NOT NULL,
+    provider character varying NOT NULL,
+    family character varying,
+    model_created_at timestamp(6) without time zone,
+    context_window integer,
+    max_output_tokens integer,
+    knowledge_cutoff date,
+    modalities jsonb DEFAULT '{}'::jsonb NOT NULL,
+    capabilities jsonb DEFAULT '[]'::jsonb NOT NULL,
+    pricing jsonb DEFAULT '{}'::jsonb NOT NULL,
+    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
 -- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.schema_migrations (
     version character varying NOT NULL
 );
+
+
+--
+-- Name: sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sessions (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    workspace_id uuid NOT NULL,
+    agent_id uuid NOT NULL,
+    model_id uuid,
+    gateway character varying DEFAULT 'web'::character varying NOT NULL,
+    status character varying DEFAULT 'active'::character varying NOT NULL,
+    message_count integer DEFAULT 0 NOT NULL,
+    total_tokens integer DEFAULT 0 NOT NULL,
+    last_activity_at timestamp(6) without time zone,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+ALTER TABLE ONLY public.sessions FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: tool_calls; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.tool_calls (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    message_id uuid NOT NULL,
+    tool_call_id character varying NOT NULL,
+    name character varying NOT NULL,
+    thought_signature text,
+    arguments jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+ALTER TABLE ONLY public.tool_calls FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -232,6 +343,14 @@ CREATE TABLE public.workspaces (
     created_at timestamp(6) without time zone NOT NULL,
     updated_at timestamp(6) without time zone NOT NULL
 );
+
+
+--
+-- Name: agents agents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agents
+    ADD CONSTRAINT agents_pkey PRIMARY KEY (id);
 
 
 --
@@ -283,11 +402,43 @@ ALTER TABLE ONLY public.good_jobs
 
 
 --
+-- Name: messages messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ruby_llm_models ruby_llm_models_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ruby_llm_models
+    ADD CONSTRAINT ruby_llm_models_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.schema_migrations
     ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (version);
+
+
+--
+-- Name: sessions sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sessions
+    ADD CONSTRAINT sessions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: tool_calls tool_calls_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.tool_calls
+    ADD CONSTRAINT tool_calls_pkey PRIMARY KEY (id);
 
 
 --
@@ -312,6 +463,34 @@ ALTER TABLE ONLY public.workspace_memberships
 
 ALTER TABLE ONLY public.workspaces
     ADD CONSTRAINT workspaces_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: idx_sessions_active_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_sessions_active_unique ON public.sessions USING btree (workspace_id, agent_id, gateway) WHERE ((status)::text = 'active'::text);
+
+
+--
+-- Name: index_agents_on_workspace_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_agents_on_workspace_id ON public.agents USING btree (workspace_id);
+
+
+--
+-- Name: index_agents_on_workspace_id_and_is_default; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_agents_on_workspace_id_and_is_default ON public.agents USING btree (workspace_id, is_default);
+
+
+--
+-- Name: index_agents_on_workspace_id_and_slug; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_agents_on_workspace_id_and_slug ON public.agents USING btree (workspace_id, slug);
 
 
 --
@@ -448,6 +627,132 @@ CREATE INDEX index_good_jobs_on_scheduled_at ON public.good_jobs USING btree (sc
 
 
 --
+-- Name: index_messages_on_model_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_messages_on_model_id ON public.messages USING btree (model_id);
+
+
+--
+-- Name: index_messages_on_role; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_messages_on_role ON public.messages USING btree (role);
+
+
+--
+-- Name: index_messages_on_session_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_messages_on_session_id ON public.messages USING btree (session_id);
+
+
+--
+-- Name: index_messages_on_session_id_and_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_messages_on_session_id_and_created_at ON public.messages USING btree (session_id, created_at);
+
+
+--
+-- Name: index_messages_on_tool_call_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_messages_on_tool_call_id ON public.messages USING btree (tool_call_id);
+
+
+--
+-- Name: index_messages_on_workspace_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_messages_on_workspace_id ON public.messages USING btree (workspace_id);
+
+
+--
+-- Name: index_ruby_llm_models_on_capabilities; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_ruby_llm_models_on_capabilities ON public.ruby_llm_models USING gin (capabilities);
+
+
+--
+-- Name: index_ruby_llm_models_on_family; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_ruby_llm_models_on_family ON public.ruby_llm_models USING btree (family);
+
+
+--
+-- Name: index_ruby_llm_models_on_modalities; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_ruby_llm_models_on_modalities ON public.ruby_llm_models USING gin (modalities);
+
+
+--
+-- Name: index_ruby_llm_models_on_provider; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_ruby_llm_models_on_provider ON public.ruby_llm_models USING btree (provider);
+
+
+--
+-- Name: index_ruby_llm_models_on_provider_and_model_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_ruby_llm_models_on_provider_and_model_id ON public.ruby_llm_models USING btree (provider, model_id);
+
+
+--
+-- Name: index_sessions_on_agent_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_sessions_on_agent_id ON public.sessions USING btree (agent_id);
+
+
+--
+-- Name: index_sessions_on_model_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_sessions_on_model_id ON public.sessions USING btree (model_id);
+
+
+--
+-- Name: index_sessions_on_workspace_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_sessions_on_workspace_id ON public.sessions USING btree (workspace_id);
+
+
+--
+-- Name: index_sessions_on_workspace_id_and_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_sessions_on_workspace_id_and_status ON public.sessions USING btree (workspace_id, status);
+
+
+--
+-- Name: index_tool_calls_on_message_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_tool_calls_on_message_id ON public.tool_calls USING btree (message_id);
+
+
+--
+-- Name: index_tool_calls_on_name; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_tool_calls_on_name ON public.tool_calls USING btree (name);
+
+
+--
+-- Name: index_tool_calls_on_tool_call_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_tool_calls_on_tool_call_id ON public.tool_calls USING btree (tool_call_id);
+
+
+--
 -- Name: index_users_on_email; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -490,6 +795,14 @@ CREATE INDEX index_workspaces_on_owner_id ON public.workspaces USING btree (owne
 
 
 --
+-- Name: messages fk_rails_1ee2a92df0; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT fk_rails_1ee2a92df0 FOREIGN KEY (session_id) REFERENCES public.sessions(id);
+
+
+--
 -- Name: workspace_memberships fk_rails_26c4c0bd41; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -506,11 +819,131 @@ ALTER TABLE ONLY public.workspaces
 
 
 --
+-- Name: messages fk_rails_552873cb52; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT fk_rails_552873cb52 FOREIGN KEY (tool_call_id) REFERENCES public.tool_calls(id);
+
+
+--
+-- Name: sessions fk_rails_85704b4d26; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sessions
+    ADD CONSTRAINT fk_rails_85704b4d26 FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
+
+
+--
+-- Name: tool_calls fk_rails_9c8daee481; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.tool_calls
+    ADD CONSTRAINT fk_rails_9c8daee481 FOREIGN KEY (message_id) REFERENCES public.messages(id);
+
+
+--
+-- Name: sessions fk_rails_aa313d0d16; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sessions
+    ADD CONSTRAINT fk_rails_aa313d0d16 FOREIGN KEY (model_id) REFERENCES public.ruby_llm_models(id);
+
+
+--
 -- Name: workspace_memberships fk_rails_aca847b4f5; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.workspace_memberships
     ADD CONSTRAINT fk_rails_aca847b4f5 FOREIGN KEY (user_id) REFERENCES public.users(id);
+
+
+--
+-- Name: messages fk_rails_b029557475; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT fk_rails_b029557475 FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
+
+
+--
+-- Name: sessions fk_rails_beac544c6e; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sessions
+    ADD CONSTRAINT fk_rails_beac544c6e FOREIGN KEY (agent_id) REFERENCES public.agents(id);
+
+
+--
+-- Name: messages fk_rails_c02b47ad97; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT fk_rails_c02b47ad97 FOREIGN KEY (model_id) REFERENCES public.ruby_llm_models(id);
+
+
+--
+-- Name: agents fk_rails_f9d68ffa97; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agents
+    ADD CONSTRAINT fk_rails_f9d68ffa97 FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
+
+
+--
+-- Name: agents; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.agents ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: messages; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: sessions; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: tool_calls; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.tool_calls ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: agents workspace_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY workspace_isolation ON public.agents TO app_user USING (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true))) WITH CHECK (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true)));
+
+
+--
+-- Name: messages workspace_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY workspace_isolation ON public.messages TO app_user USING (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true))) WITH CHECK (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true)));
+
+
+--
+-- Name: sessions workspace_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY workspace_isolation ON public.sessions TO app_user USING (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true))) WITH CHECK (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true)));
+
+
+--
+-- Name: tool_calls workspace_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY workspace_isolation ON public.tool_calls TO app_user USING ((EXISTS ( SELECT 1
+   FROM public.messages
+  WHERE ((messages.id = tool_calls.message_id) AND ((messages.workspace_id)::text = current_setting('app.current_workspace_id'::text, true)))))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM public.messages
+  WHERE ((messages.id = tool_calls.message_id) AND ((messages.workspace_id)::text = current_setting('app.current_workspace_id'::text, true))))));
 
 
 --
@@ -520,6 +953,15 @@ ALTER TABLE ONLY public.workspace_memberships
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260330100600'),
+('20260330100560'),
+('20260330100550'),
+('20260330100500'),
+('20260330100400'),
+('20260330100300'),
+('20260330100200'),
+('20260330100100'),
+('20260330100000'),
 ('20260330090400'),
 ('20260330090300'),
 ('20260330090200'),

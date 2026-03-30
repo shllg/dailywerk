@@ -1,9 +1,6 @@
 export { CodeBlock } from './CodeBlock'
 export type { CodeBlockProps } from './CodeBlock'
 
-export { ConversationList } from './ConversationList'
-export type { ConversationListProps } from './ConversationList'
-
 export { MarkdownRenderer } from './MarkdownRenderer'
 export type { MarkdownRendererProps } from './MarkdownRenderer'
 

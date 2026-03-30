@@ -1,1 +1,1 @@
-export { ChatLayout } from './ChatLayout'
+export { AppShell } from './AppShell'

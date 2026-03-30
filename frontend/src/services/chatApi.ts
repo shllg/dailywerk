@@ -1,23 +1,53 @@
-import type { Message, Session } from '../types/chat'
+import type { ChatState, Message } from '../types/chat'
 import { apiRequest } from './api'
 
-export function fetchSessions(): Promise<Session[]> {
-  return apiRequest('/chat/sessions')
+interface ChatApiMessage {
+  id: string
+  role: Message['role']
+  content: string
+  timestamp: string
 }
 
-export function fetchMessages(sessionId: string): Promise<Message[]> {
-  return apiRequest(`/chat/sessions/${sessionId}/messages`)
+interface ChatApiResponse {
+  session_id: string
+  agent: ChatState['agent']
+  messages: ChatApiMessage[]
 }
 
-export function createSession(): Promise<Session> {
-  return apiRequest('/chat/sessions', { method: 'POST' })
+function formatTimestamp(timestamp: string) {
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) {
+    return timestamp
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
-export function sendMessage(
-  sessionId: string,
-  content: string,
-): Promise<Message> {
-  return apiRequest(`/chat/sessions/${sessionId}/messages`, {
+function normalizeMessage(message: ChatApiMessage): Message {
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    timestamp: formatTimestamp(message.timestamp),
+    status: 'sent',
+  }
+}
+
+export async function fetchChat(): Promise<ChatState> {
+  const response = await apiRequest<ChatApiResponse>('/chat')
+
+  return {
+    sessionId: response.session_id,
+    agent: response.agent,
+    messages: response.messages.map(normalizeMessage),
+  }
+}
+
+export async function sendMessage(content: string): Promise<void> {
+  await apiRequest('/chat', {
     method: 'POST',
     body: JSON.stringify({ message: { content } }),
   })
