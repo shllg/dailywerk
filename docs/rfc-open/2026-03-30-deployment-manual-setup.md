@@ -13,207 +13,205 @@ phase: 1
 
 ## Context
 
-Some deployment steps require human judgment, account creation, or access to web dashboards that cannot be automated. This RFC lists everything the operator must do manually before and after the automated setup (see sibling RFC: Server Automation).
+This RFC covers the operator actions that cannot be cleanly automated away: Hetzner provisioning, Cloudflare setup, credentials, GitHub/GHCR configuration, and the final acceptance checks for the Docker-based production model.
 
 ---
 
-## 1. Hetzner — Server Provisioning
+## 1. Hetzner Provisioning
 
-### 1.1 Create Server
+### 1.1 Create the Server
 
-1. Log into [Hetzner Cloud Console](https://console.hetzner.cloud)
-2. Create new project: "DailyWerk"
-3. Create server:
-   - **Location**: Falkenstein (FSN1) or Nuremberg (NBG1)
-   - **Image**: Ubuntu 24.04
-   - **Type**: CPX41 (8 vCPU, 16 GB RAM, 240 GB NVMe) — or CPX31 to start smaller
-   - **SSH Key**: Add your public key (Ed25519)
-   - **Name**: `dailywerk-01`
-   - **Backups**: Enable (adds ~20% cost, provides weekly snapshots)
-4. Note the server's IPv4 address
+1. Log into Hetzner Cloud
+2. Create a project for DailyWerk
+3. Create a server with:
+   - **Location**: FSN1 or NBG1
+   - **Image**: **Debian stable**
+     - target: Debian 13 "trixie"
+     - fallback only if image availability lags: Debian 12
+   - **Type**: CPX41 preferred, CPX31 minimum
+   - **SSH key**: add your Ed25519 key
+   - **Backups**: enable Hetzner snapshots
+4. Record the public IPv4 address
 
-### 1.2 Create Object Storage Bucket (Backups)
+### 1.2 Object Storage
 
-1. In Hetzner Cloud Console → Object Storage
-2. Create bucket: `dailywerk-backups`
-3. Location: same as server (FSN1)
-4. Generate S3 credentials (access key + secret key)
-5. Save credentials securely — needed for backup scripts
+Create separate Hetzner Object Storage buckets:
 
-**Note**: The primary application S3 storage (Hetzner Object Storage for vault files) is a separate bucket with separate credentials.
+- `dailywerk-backups`
+- `dailywerk-production`
+- `dailywerk-staging`
 
-### 1.3 Create Application Storage Bucket
+Record:
 
-1. Create bucket: `dailywerk-production`
-2. Create bucket: `dailywerk-staging`
-3. Generate S3 credentials (can reuse same access key pair)
+- access key ID
+- secret key
+- endpoint URL
+- region
 
----
-
-## 2. Cloudflare — DNS & SSL
-
-### 2.1 Add Domain
-
-1. Log into [Cloudflare Dashboard](https://dash.cloudflare.com)
-2. Add site: `dailywerk.com` (or chosen domain)
-3. Update nameservers at domain registrar to Cloudflare's
-
-### 2.2 DNS Records
-
-| Type | Name | Content | Proxy |
-|------|------|---------|-------|
-| A | `app` | `<server-ip>` | Proxied (orange cloud) |
-| A | `staging` | `<server-ip>` | Proxied (orange cloud) |
-
-### 2.3 SSL/TLS Settings
-
-1. **SSL/TLS → Overview**: Set to **Full (Strict)**
-2. **SSL/TLS → Origin Server**: Create Origin Certificate
-   - Hostnames: `*.dailywerk.com, dailywerk.com`
-   - Validity: 15 years
-   - Key type: RSA (2048)
-   - **Download both**: certificate (`.pem`) and private key (`.key`)
-   - Save these files — you'll upload them to the server
-3. **SSL/TLS → Origin Server**: Enable **Authenticated Origin Pulls**
-   - Download [Cloudflare's CA certificate](https://developers.cloudflare.com/ssl/origin-configuration/authenticated-origin-pull/set-up/zone-level/) for origin pull verification
-
-### 2.4 Cloudflare Settings
-
-Navigate through the Cloudflare dashboard and set:
-
-| Section | Setting | Value |
-|---------|---------|-------|
-| SSL/TLS | Always Use HTTPS | On |
-| SSL/TLS | Minimum TLS Version | 1.2 |
-| Speed → Optimization | HTTP/2 | On |
-| Network | WebSockets | On |
-| Security → Settings | Security Level | Medium |
-| Caching → Configuration | Browser Cache TTL | Respect Existing Headers |
+`dailywerk-backups` is used for encrypted off-host backups. The application buckets are used for Active Storage or other object storage needs.
 
 ---
 
-## 3. GitHub — Repository Access
+## 2. Cloudflare Setup
 
-### 3.1 Deploy Key
+### 2.1 DNS
 
-1. On the server (after initial SSH), generate a deploy key:
-   ```bash
-   ssh-keygen -t ed25519 -C "dailywerk-deploy" -f ~/.ssh/deploy_key -N ""
-   ```
-2. In GitHub → Settings → Deploy Keys → Add deploy key
-   - Title: `dailywerk-server`
-   - Key: contents of `~/.ssh/deploy_key.pub`
-   - Allow write access: **No** (read-only)
+Create proxied DNS records:
 
-### 3.2 Webhook (if using webhook deploys)
+| Type | Name | Target |
+|------|------|--------|
+| A | `app` | server IP |
+| A | `staging` | server IP |
+| A | `ops` | server IP |
 
-1. In GitHub → Settings → Webhooks → Add webhook
-   - Payload URL: `https://app.dailywerk.com/deploy-webhook` (or a non-standard port)
-   - Content type: `application/json`
-   - Secret: generate a strong random secret, save it
-   - Events: Just the push event
-   - Active: Yes
+`ops.dailywerk.com` is the admin-facing Grafana endpoint.
 
-### 3.3 Branch Protection (Optional)
+### 2.2 SSL/TLS
 
-For `master`:
-- Require pull request reviews before merging
-- Require status checks to pass (when CI is set up)
+In Cloudflare:
 
----
+1. Set SSL/TLS mode to **Full (Strict)**
+2. Create a Cloudflare origin certificate for:
+   - `app.dailywerk.com`
+   - `staging.dailywerk.com`
+   - `ops.dailywerk.com`
+3. Enable **Authenticated Origin Pulls**
+4. Download:
+   - origin certificate
+   - origin private key
+   - Authenticated Origin Pull CA certificate
 
-## 4. WorkOS — Auth Configuration
+### 2.3 Cloudflare Settings
 
-### 4.1 Create Application
+Enable:
 
-1. Log into [WorkOS Dashboard](https://dashboard.workos.com)
-2. Create application or use existing one
-3. Configure redirect URIs:
-   - `https://app.dailywerk.com/auth/callback`
-   - `https://staging.dailywerk.com/auth/callback`
-4. Note: API Key, Client ID
+- Always Use HTTPS
+- WebSockets
+- HTTP/2
+- minimum TLS 1.2 or higher
 
-### 4.2 Auth Methods
+Restrict access to `ops.dailywerk.com` with either:
 
-Enable desired auth methods:
-- Magic Links (email)
-- Social login (Google, GitHub — as needed)
-- SSO (if needed later)
+- Cloudflare Access, or
+- Cloudflare WAF/IP rules plus Grafana auth
 
 ---
 
-## 5. Stripe — Payments Configuration
+## 3. GitHub and GHCR
 
-### 5.1 Account Setup
+### 3.1 GHCR Access for the Server
 
-1. Log into [Stripe Dashboard](https://dashboard.stripe.com)
-2. Complete account activation (business details, bank account)
-3. Note API keys (publishable + secret) for both:
-   - **Live mode** (production)
-   - **Test mode** (staging)
+Create a read-only credential for GHCR image pulls from the server.
 
-### 5.2 Webhook Endpoint
+Preferred options:
 
-1. Developers → Webhooks → Add endpoint
-   - URL: `https://app.dailywerk.com/api/v1/webhooks/stripe`
-   - Events: `customer.subscription.*`, `invoice.*`, `payment_intent.*`
-2. Note the webhook signing secret
-3. Repeat for staging with test mode keys
+1. fine-grained PAT with package read access
+2. GitHub App with package read access
 
-### 5.3 Products & Prices
+Store the credential outside the repo and inject it into the host at setup time.
 
-Create subscription products and prices as defined in [PRD 04 §1](../prd/04-billing-and-operations.md#1-payments--stripe-integration). This is product-specific and should be done when billing is implemented.
+### 3.2 Deploy Notification Secret
+
+Generate and store a secret used to sign deploy notifications from GitHub to the server-side deploy listener.
+
+You need:
+
+- `DEPLOY_WEBHOOK_URL`
+- `DEPLOY_WEBHOOK_SECRET`
+
+These are used by the workflow that reacts to published GHCR packages.
+
+### 3.3 Repository Settings
+
+Verify or configure:
+
+- branch protection on `master`
+- branch protection on `develop` if staging uses it
+- GHCR package visibility and access rules
+- GitHub Actions enabled for package publishing
 
 ---
 
-## 6. Rails Credentials
+## 4. Grafana / Ops Access
 
-### 6.1 Generate Production Credentials
+### 4.1 Decide the Admin Access Model
 
-```bash
-EDITOR=nano rails credentials:edit --environment production
-```
+Choose one:
 
-Add all secrets:
+- Grafana login + Cloudflare Access
+- Grafana login + IP allowlist
+- Grafana login + both
 
-```yaml
-secret_key_base: <generate with `rails secret`>
+Recommendation: **Grafana login + Cloudflare Access** for the cleanest browser-based admin experience.
 
-workos:
-  api_key: wos_...
-  client_id: client_...
+### 4.2 Prepare Grafana Credentials
 
-stripe:
-  secret_key: sk_live_...
-  publishable_key: pk_live_...
-  webhook_secret: whsec_...
+Create and store:
 
-openai:
-  api_key: sk-...
+- Grafana admin username
+- Grafana admin password
 
-hetzner_s3:
-  access_key_id: ...
-  secret_access_key: ...
-  endpoint: https://fsn1.your-objectstorage.com
+These should not be embedded directly in committed compose files.
 
-database:
-  app_user_password: <generate strong password>
-```
+---
 
-### 6.2 Transfer Master Key
+## 5. WorkOS and Stripe
 
-The `config/credentials/production.key` file must be securely transferred to the server. Options:
-- `scp` directly to the server
-- Paste via SSH session
-- Store in a password manager, retrieve on server
+### 5.1 WorkOS
 
-**Never commit the key file. Never transmit over unencrypted channels.**
+Configure redirect/callback URLs for:
+
+- `https://app.dailywerk.com/...`
+- `https://staging.dailywerk.com/...`
+
+Record:
+
+- WorkOS API key
+- WorkOS client ID
+
+### 5.2 Stripe
+
+Configure webhook endpoints for:
+
+- production
+- staging
+
+Record:
+
+- publishable key
+- secret key
+- webhook signing secret
+
+---
+
+## 6. Rails Secrets and Application Credentials
+
+### 6.1 Production Credentials
+
+Prepare production and staging secrets for:
+
+- Rails master key
+- WorkOS
+- Stripe
+- object storage
+- database role password
+- GHCR pull token if the deploy listener expects it in env
+- backup encryption/restic password material
+
+### 6.2 Backup Encryption Material
+
+The backup design assumes encrypted off-host backups. Prepare and store one of:
+
+- a restic repository password, or
+- an `age` public/private keypair if the implementation chooses envelope encryption for exported artifacts
+
+Do not keep the only copy of the backup secret on the server.
 
 ---
 
 ## 7. Initial Server Access
 
-### 7.1 First SSH
+### 7.1 First Login
 
 ```bash
 ssh root@<server-ip>
@@ -231,53 +229,45 @@ chmod 700 /home/deploy/.ssh
 chmod 600 /home/deploy/.ssh/authorized_keys
 ```
 
-### 7.3 Verify Deploy User Access
+### 7.3 Verify Access
 
 ```bash
-# From local machine
 ssh deploy@<server-ip>
-sudo echo "sudo works"  # Should prompt for confirmation, not password
+sudo true
 ```
 
-After verifying, disable root SSH login (done by automation RFC).
+The deploy user remains the operational account even though the runtime is containerized.
 
 ---
 
-## 8. Upload Certificates to Server
+## 8. Upload Cloudflare Certificates
 
 ```bash
-# From local machine — transfer Cloudflare origin cert and key
 scp origin.pem deploy@<server-ip>:/tmp/
 scp origin-key.pem deploy@<server-ip>:/tmp/
 scp authenticated_origin_pull_ca.pem deploy@<server-ip>:/tmp/
-
-# On server — move to correct location
-sudo mkdir -p /etc/ssl/cloudflare
-sudo mv /tmp/origin.pem /etc/ssl/cloudflare/
-sudo mv /tmp/origin-key.pem /etc/ssl/cloudflare/
-sudo mv /tmp/authenticated_origin_pull_ca.pem /etc/ssl/cloudflare/
-sudo chmod 600 /etc/ssl/cloudflare/origin-key.pem
-sudo chmod 644 /etc/ssl/cloudflare/origin.pem /etc/ssl/cloudflare/authenticated_origin_pull_ca.pem
 ```
+
+These are later moved into the location expected by the edge compose / Nginx container setup.
 
 ---
 
 ## 9. Post-Automation Verification
 
-After the server automation RFC scripts have run, manually verify:
+After the automation RFC has been applied, manually verify:
 
-1. [ ] SSH as `deploy` user works (not root)
-2. [ ] `sudo` works for deploy user
-3. [ ] `https://app.dailywerk.com/up` returns 200
-4. [ ] `https://staging.dailywerk.com/up` returns 200
-5. [ ] WebSocket connects (`wss://app.dailywerk.com/cable`)
-6. [ ] PostgreSQL is running, both databases exist
-7. [ ] Redis is running
-8. [ ] Backups are scheduled (`systemctl list-timers`)
-9. [ ] `ufw status` shows only expected ports
-10. [ ] `fail2ban-client status` shows SSH jail active
-11. [ ] SSL Labs test (via Cloudflare): A+ rating
-12. [ ] GoodJob dashboard accessible (via admin auth)
+1. [ ] SSH as `deploy` works and root login is disabled
+2. [ ] Docker Engine and `docker compose` are available
+3. [ ] `dailywerk-infra` is healthy
+4. [ ] PostgreSQL and Valkey are reachable only on internal Docker networks
+5. [ ] `https://app.dailywerk.com/up` returns success
+6. [ ] `https://staging.dailywerk.com/up` returns success
+7. [ ] zero-downtime rehearsal works by deploying a harmless image change
+8. [ ] `https://ops.dailywerk.com` opens Grafana
+9. [ ] Grafana shows Prometheus metrics
+10. [ ] Grafana Explore can query Loki logs from app, worker, and Nginx
+11. [ ] backups run and an encrypted restore rehearsal succeeds
+12. [ ] GHCR publish event reaches the deploy listener
 
 ---
 
@@ -285,10 +275,9 @@ After the server automation RFC scripts have run, manually verify:
 
 | Task | Frequency | Notes |
 |------|-----------|-------|
-| Hetzner billing review | Monthly | Verify costs in budget |
-| Cloudflare security events | Weekly | Check for attack patterns |
-| SSL certificate renewal | Never (15-year origin cert) | Monitor expiry date anyway |
-| Ubuntu LTS upgrade | Every 2 years | 24.04 → 26.04 |
-| Backup restore test | Quarterly | Restore to staging, verify data |
-| Stripe webhook health | Monthly | Check for failed deliveries |
-| Review server access logs | Weekly | Look for anomalies |
+| review Hetzner cost | monthly | ensure CPX41 is still the right size |
+| review Cloudflare security events | weekly | especially admin endpoints |
+| test restore from encrypted backup | quarterly | restore into staging or isolated temp environment |
+| review Grafana alerts | weekly | confirm alert routes still work |
+| review GHCR package retention | monthly | avoid unnecessary image bloat |
+| Debian major upgrade planning | per release | keep stable but deliberate |

@@ -17,8 +17,8 @@ implemented_by:
 # DailyWerk — Deployment on Single Hetzner Server
 
 > Production and staging environments on one Hetzner Cloud VPS.
-> For stack decisions: see [01-platform-and-infrastructure.md](./01-platform-and-infrastructure.md).
-> For background job config: see [04-billing-and-operations.md §8](./04-billing-and-operations.md#8-goodjob-configuration).
+> This version assumes Debian + Docker Compose + GHCR + blue/green deploys.
+> For stack decisions, see [01-platform-and-infrastructure.md](./01-platform-and-infrastructure.md).
 
 ---
 
@@ -26,548 +26,409 @@ implemented_by:
 
 | Goal | Detail |
 |------|--------|
-| **Simple** | One server, no Kubernetes, no multi-node orchestration |
-| **Affordable** | €20–30/month for the VPS |
-| **Two environments** | Production and staging on the same host, isolated |
-| **GitHub-driven deploys** | Push to `master` → production, push to `develop` → staging |
-| **Local observability** | All logs, metrics, monitoring on the server itself — no external SaaS |
-| **Recoverable** | Automated backups with tested restore procedures |
-| **Claude Code on server** | Claude Code installed for server-side automation tasks |
+| **Single host** | One Hetzner Cloud VPS, no Kubernetes, no multi-node orchestration |
+| **Docker-first** | Application and service runtime should rely on Docker images and Docker Compose |
+| **Two environments** | Production and staging on one host with strict isolation |
+| **Zero-downtime deploys** | App deploys must switch traffic without a visible outage |
+| **GHCR-driven delivery** | `master` publishes production images, `develop` publishes staging images |
+| **Local observability** | Metrics, dashboards, and logs stay on the host, reachable via web UI |
+| **Recoverable** | Backups must be compressed, encrypted, restorable, and tested |
+| **Affordable** | Target server cost stays in the ~20–30 EUR/month range |
+| **Claude Code on server** | Claude Code is available for operational automation, but not part of the serving path |
 
-### What This PRD Does NOT Cover
+### Explicit Non-Goals
 
-- Kubernetes, container orchestration, or multi-server setups
-- CDN configuration beyond Cloudflare proxy
-- CI/CD pipelines (GitHub Actions definition) — the RFCs describe the deploy trigger, not the full pipeline
-- Signal bridge deployment (separate VPS per [PRD 01 §6](./01-platform-and-infrastructure.md#6-deployment-architecture-mvp))
+- Kubernetes, Nomad, or Swarm
+- Multi-host HA for databases or application slots
+- Managed SaaS observability
+- Bare-metal or native-process deployment of Rails, GoodJob, PostgreSQL, or Valkey
 
 ---
 
-## 2. Server Specification
+## 2. Server Baseline
 
-### Recommended: Hetzner Cloud CPX31 or CPX41
+### Recommended Host
 
 | Spec | CPX31 | CPX41 |
 |------|-------|-------|
-| vCPU | 4 (AMD) | 8 (AMD) |
+| vCPU | 4 | 8 |
 | RAM | 8 GB | 16 GB |
 | Disk | 160 GB NVMe | 240 GB NVMe |
 | Traffic | 20 TB | 20 TB |
-| Price | ~€14/mo | ~€27/mo |
+| Price | ~14 EUR/mo | ~27 EUR/mo |
 
-**Recommendation**: Start with **CPX41** (8 vCPU, 16 GB RAM, 240 GB NVMe). Running PostgreSQL + pgvector, Redis, Falcon, GoodJob workers, Nginx, and Node.js (Obsidian Headless) concurrently needs headroom. 16 GB RAM gives comfortable room for pgvector indexes and LLM response buffering. Upgrade or downgrade is a single Hetzner API call.
+**Recommendation**: start with **CPX41**. Blue/green slots, pgvector, Valkey, Prometheus, Grafana, Loki, and image layers all compete for RAM and disk cache. CPX31 is possible for early validation, but CPX41 is the safer default.
 
-**Location**: Falkenstein (FSN1) or Nuremberg (NBG1) — EU, low latency to Cloudflare EU edge.
+### Operating System
 
-**OS**: Ubuntu 24.04 LTS (Hetzner image, minimal).
+- **Debian stable** on Hetzner Cloud
+- As of **March 30, 2026**, Debian stable is **Debian 13 "trixie"**
+- If Hetzner image availability lags in a region, Debian 12 is an acceptable temporary fallback, but the target baseline for this plan is Debian 13
+
+### Host Packages
+
+The host should stay intentionally small:
+
+- Docker Engine
+- Docker Compose plugin
+- `ufw`, `fail2ban`, `unattended-upgrades`
+- minimal shell/debug tooling
+- no host-level Ruby, Node, PostgreSQL, or Valkey for production workloads
 
 ### Storage Planning
 
-| Data | Est. Size (10 users, 6 months) | Location |
-|------|-------------------------------|----------|
-| PostgreSQL (with pgvector) | 5–15 GB | `/var/lib/postgresql/` |
-| Redis (ephemeral) | <100 MB | In-memory |
-| Application code (2 envs) | <1 GB | `/opt/dailywerk/` |
-| Vault checkouts (warm) | 10–50 GB | `/data/workspaces/` |
-| Backups (local, rolling 7d) | 10–30 GB | `/var/backups/dailywerk/` |
-| Logs | 1–5 GB (with rotation) | `/var/log/dailywerk/` |
-| **Total** | **~30–100 GB** | 240 GB plenty |
+| Data | Estimate | Backing |
+|------|----------|---------|
+| PostgreSQL data volume | 10–40 GB | Docker named volume |
+| Valkey data volume | <1 GB | Docker named volume |
+| Workspace and vault data | 10–50 GB | bind mount under `/srv/dailywerk/data/` |
+| GHCR image layers | 10–25 GB | Docker image cache |
+| Prometheus, Loki, Grafana | 10–25 GB | Docker named volumes |
+| Local backup spool | 10–20 GB | `/srv/dailywerk/backups/` |
+| Total practical use | ~50–160 GB | fits comfortably on 240 GB NVMe |
 
 ---
 
-## 3. Process Layout
+## 3. Runtime Architecture
 
-All processes run natively (no Docker in production). Docker adds memory overhead and operational complexity for a single-server setup with no scaling needs.
+The server runs several Docker Compose projects with clear ownership boundaries.
 
+### 3.1 Compose Projects
+
+| Project | Purpose | Core Services |
+|---------|---------|---------------|
+| `dailywerk-infra` | stateful data services | PostgreSQL 17 + pgvector, Valkey |
+| `dailywerk-observability` | metrics, dashboards, logs | Prometheus, Grafana, Loki, Promtail, exporters |
+| `dailywerk-edge` | ingress and deployment control | Nginx, deploy-listener |
+| `dailywerk-prod-blue` / `dailywerk-prod-green` | active/inactive production slots | frontend, api, worker |
+| `dailywerk-staging-blue` / `dailywerk-staging-green` | active/inactive staging slots | frontend, api, worker |
+
+### 3.2 Core Design Rules
+
+- **PostgreSQL and Valkey live in their own compose project** and are not rebuilt on normal app deploys
+- **Application slots are immutable** and are created from GHCR images
+- **Nginx switches between blue and green slots** after health checks pass
+- **Prometheus, Grafana, and Loki are mandatory**, not optional
+- **Grafana Explore is the primary log viewer**; no separate proprietary log product is needed
+
+### 3.3 Logical Diagram
+
+```text
+Cloudflare
+  -> Nginx (edge compose)
+     -> active production slot (blue or green)
+        -> frontend container
+        -> api container
+        -> worker container
+     -> active staging slot (blue or green)
+        -> frontend container
+        -> api container
+        -> worker container
+
+Shared state (separate infra compose)
+  -> PostgreSQL 17 + pgvector
+  -> Valkey
+
+Observability (separate observability compose)
+  -> Prometheus
+  -> Grafana
+  -> Loki
+  -> Promtail
+  -> node_exporter / cAdvisor / postgres_exporter / valkey_exporter
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Hetzner Cloud VPS (Ubuntu 24.04)                               │
-│                                                                 │
-│  Nginx (TLS termination, reverse proxy, static files)           │
-│    ├── app.dailywerk.com    → Falcon :3000 (production)         │
-│    ├── staging.dailywerk.com → Falcon :3100 (staging)           │
-│    └── static SPA assets    → /opt/dailywerk/prod/frontend/dist │
-│                                                                 │
-│  Production Environment (:3000)                                 │
-│    ├── Falcon (Rails API + ActionCable WebSocket)               │
-│    ├── GoodJob Worker (external mode, separate process)         │
-│    └── Node.js 22 (Obsidian Headless, future)                   │
-│                                                                 │
-│  Staging Environment (:3100)                                    │
-│    ├── Falcon (Rails API + ActionCable WebSocket)               │
-│    ├── GoodJob Worker (external mode, separate process)         │
-│    └── (shares PostgreSQL + Redis, separate databases)          │
-│                                                                 │
-│  Shared Services                                                │
-│    ├── PostgreSQL 17 (+pgvector) — two databases                │
-│    ├── Redis 7 — key namespacing per environment                │
-│    └── systemd managing all processes                           │
-│                                                                 │
-│  Tooling                                                        │
-│    ├── Claude Code (for server automation)                      │
-│    └── GitHub deploy key (read-only)                            │
-└─────────────────────────────────────────────────────────────────┘
-```
 
-### Process Manager: systemd
+---
 
-Each process gets its own systemd unit file. This gives:
-- Automatic restart on crash (`Restart=on-failure`)
-- Log integration with journald
-- Resource limits via cgroups (`MemoryMax`, `CPUQuota`)
-- Dependency ordering (`After=postgresql.service redis.service`)
-- Clean shutdown signals
-
-### Environment Isolation
+## 4. Environment Isolation
 
 | Resource | Production | Staging |
-|----------|-----------|--------|
-| PostgreSQL DB | `dailywerk_production` | `dailywerk_staging` |
-| Redis prefix | `prod:` | `staging:` |
-| Falcon port | 3000 | 3100 |
-| ActionCable port | via Falcon | via Falcon |
-| App directory | `/opt/dailywerk/prod/` | `/opt/dailywerk/staging/` |
-| Vault data | `/data/workspaces/prod/` | `/data/workspaces/staging/` |
-| .env file | `/opt/dailywerk/prod/.env` | `/opt/dailywerk/staging/.env` |
-| systemd prefix | `dailywerk-prod-*` | `dailywerk-staging-*` |
+|----------|-----------|---------|
+| Domain | `app.dailywerk.com` | `staging.dailywerk.com` |
+| DB | `dailywerk_production` | `dailywerk_staging` |
+| Valkey logical DB | `0` | `1` |
+| Compose slot pairs | `prod-blue`, `prod-green` | `staging-blue`, `staging-green` |
+| Workspace root | `/srv/dailywerk/data/prod/` | `/srv/dailywerk/data/staging/` |
+| Image tag channel | `prod-*` | `staging-*` |
+| Active slot marker | `/srv/dailywerk/runtime/prod-active-slot` | `/srv/dailywerk/runtime/staging-active-slot` |
+
+### Isolation Expectations
+
+- production and staging share the host but not the same DB
+- production and staging do not share workspace directories
+- one slot is active while the other is available for rollout or rollback
+- observability and infra are shared but labeled by environment
 
 ---
 
-## 4. Routing — Cloudflare to Server
+## 5. Routing and TLS
 
-```
-User → Cloudflare Edge (SSL termination, DDoS, WAF)
-     → Cloudflare Origin Pull (HTTPS, origin certificate)
-     → Nginx (443, origin cert + key)
-     → Falcon (localhost:3000 or :3100)
+```text
+User
+  -> Cloudflare edge
+  -> Cloudflare Origin Pull
+  -> Nginx container on the Hetzner host
+  -> active frontend/api slot
 ```
 
 ### TLS Strategy
 
-1. **Cloudflare → User**: Cloudflare manages the public TLS certificate automatically.
-2. **Cloudflare → Origin (Nginx)**: Cloudflare Origin Certificate (15-year, free). Nginx presents this cert. Cloudflare SSL mode: **Full (Strict)**.
-3. **Nginx → Falcon**: Plain HTTP over localhost. No TLS needed for loopback traffic.
-
-### Cloudflare Configuration
-
-| Setting | Value | Reason |
-|---------|-------|--------|
-| SSL/TLS mode | Full (Strict) | Origin cert validation |
-| Always Use HTTPS | On | Force HTTPS |
-| Minimum TLS | 1.2 | Security baseline |
-| HTTP/2 | On | Performance |
-| WebSockets | On | ActionCable |
-| Authenticated Origin Pulls | On | Verify Cloudflare → origin |
-| Browser Cache TTL | Respect Existing Headers | Let Nginx control caching |
+1. Cloudflare serves the public certificate to end users
+2. Nginx presents a Cloudflare origin certificate to Cloudflare
+3. Cloudflare SSL mode is **Full (Strict)**
+4. Cloudflare Authenticated Origin Pulls are enabled
+5. Nginx proxies internally to the active blue/green slot over the Docker network
 
 ### DNS Records
 
-| Type | Name | Value | Proxy |
-|------|------|-------|-------|
-| A | app | `<server-ip>` | Proxied (orange cloud) |
-| A | staging | `<server-ip>` | Proxied (orange cloud) |
+| Type | Name | Target | Notes |
+|------|------|--------|-------|
+| A | `app` | Hetzner server IP | proxied |
+| A | `staging` | Hetzner server IP | proxied |
+| A | `ops` | Hetzner server IP | proxied, admin-only |
 
-### Nginx Configuration Sketch
-
-```nginx
-# /etc/nginx/sites-available/dailywerk-prod
-upstream falcon_prod {
-    server 127.0.0.1:3000;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name app.dailywerk.com;
-
-    ssl_certificate     /etc/ssl/cloudflare/origin.pem;
-    ssl_certificate_key /etc/ssl/cloudflare/origin-key.pem;
-
-    # Verify requests come from Cloudflare
-    ssl_client_certificate /etc/ssl/cloudflare/authenticated_origin_pull_ca.pem;
-    ssl_verify_client on;
-
-    # SPA static files
-    root /opt/dailywerk/prod/frontend/dist;
-
-    # API and WebSocket
-    location /api/ {
-        proxy_pass http://falcon_prod;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-    }
-
-    location /cable {
-        proxy_pass http://falcon_prod;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_read_timeout 3600s;  # Keep WebSocket alive
-    }
-
-    # Health check (bypass Cloudflare auth for uptime monitoring)
-    location = /up {
-        proxy_pass http://falcon_prod;
-    }
-
-    # GoodJob dashboard (admin only, restrict by IP or auth)
-    location /good_job {
-        proxy_pass http://falcon_prod;
-        # TODO: restrict access via HTTP basic auth or IP allowlist
-    }
-
-    # SPA fallback — serve index.html for client-side routing
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    # Security headers (Cloudflare adds some, but belt-and-suspenders)
-    add_header X-Frame-Options DENY always;
-    add_header X-Content-Type-Options nosniff always;
-    add_header Referrer-Policy strict-origin-when-cross-origin always;
-}
-```
+`ops.dailywerk.com` is used for Grafana so logs and dashboards are available in a browser behind admin auth.
 
 ---
 
-## 5. Deployment Strategy
+## 6. Deployment Strategy
 
-### Branch Model
+### 6.1 Image Flow
 
-| Branch | Environment | Trigger |
-|--------|-------------|--------|
-| `master` | Production | Push/merge to master |
-| `develop` | Staging | Push/merge to develop |
+| Branch | Result | Target |
+|--------|--------|--------|
+| `master` | build and publish immutable production images to GHCR | production |
+| `develop` | build and publish immutable staging images to GHCR | staging |
 
-### Deploy Flow
+Recommended images:
 
-```
-Developer pushes to master
-  → GitHub webhook fires
-  → Server-side deploy script runs (systemd timer or webhook listener)
-  → git pull --ff-only
-  → bundle install --deployment
-  → RAILS_ENV=production bin/rails db:migrate
-  → RAILS_ENV=production bin/rails assets:precompile (if needed)
-  → cd frontend && pnpm install --frozen-lockfile && pnpm build
-  → systemctl restart dailywerk-prod-falcon
-  → systemctl restart dailywerk-prod-worker
-  → Health check: curl -f https://app.dailywerk.com/up
-```
+- `ghcr.io/shllg/dailywerk-api`
+- `ghcr.io/shllg/dailywerk-frontend`
+- `ghcr.io/shllg/dailywerk-postgres-pgvector`
+- optional helper images such as `deploy-listener` or backup runner
 
-### Deploy Mechanism Options
+Recommended tags:
 
-**Option A: Webhook listener (recommended for simplicity)**
-A lightweight webhook receiver (e.g., `webhook` package or a small Ruby script) listens on a localhost port. GitHub sends a push webhook. The receiver verifies the signature, checks the branch, and runs the deploy script.
+- immutable tags: commit SHA, e.g. `prod-<sha>` and `staging-<sha>`
+- moving channel tags: `prod-current`, `staging-current`
 
-**Option B: GitHub Actions + SSH**
-GitHub Actions SSH into the server and run the deploy script. Requires a deploy SSH key stored in GitHub Secrets.
+### 6.2 Trigger Model
 
-**Option C: Polling (simplest, least responsive)**
-A cron job or systemd timer runs `git fetch && git diff --quiet origin/master` every minute. If changes detected, run deploy script. No webhook infrastructure needed.
+The deployment path is event-driven:
 
-### Zero-Downtime Considerations
+1. GitHub Actions builds and publishes the image to GHCR
+2. A **package-publish event** from GHCR triggers a deploy notification
+3. The server-side deploy-listener receives the signed webhook
+4. The deploy-listener updates the inactive slot with Docker Compose
+5. Nginx flips traffic only after readiness checks pass
 
-For MVP with <10 users, a brief restart (~2–5 seconds) is acceptable. Falcon restarts quickly. If zero-downtime becomes important:
-- Use systemd `ExecReload` with Falcon's graceful reload
-- Or run two Falcon instances behind Nginx and swap upstream
+This avoids git polling on the server and keeps the server focused on pulling images, not building code.
 
-### Rollback
+### 6.3 Zero-Downtime Rollout
 
-```bash
-# Immediate rollback: revert to previous commit
-cd /opt/dailywerk/prod
-git checkout HEAD~1
-bundle install --deployment
-RAILS_ENV=production bin/rails db:rollback STEP=1  # if migration was run
-systemctl restart dailywerk-prod-falcon dailywerk-prod-worker
-```
+For each environment:
 
-Keep the last 3 releases as git tags for quick reference.
+1. read the active slot (`blue` or `green`)
+2. select the inactive slot
+3. `docker compose pull` the new frontend/api images for the inactive slot
+4. run one-off migrations using the new API image against the shared DB
+5. start the new inactive slot containers
+6. wait for readiness on the new slot
+7. rewrite or reload the Nginx upstream target
+8. switch traffic to the new slot
+9. keep the previous slot warm briefly, then stop it
 
----
+### 6.4 Rollback
 
-## 6. Security & Server Hardening
+Rollback must be immediate:
 
-### SSH
+- switch Nginx back to the previous slot
+- keep the prior slot definition and image tag available
+- if a migration is backward-incompatible, the migration plan must include an explicit rollback or expand/contract sequence
 
-- **Disable password auth** — key-only (`PasswordAuthentication no`)
-- **Disable root login** — use a deploy user with sudo (`PermitRootLogin no`)
-- **Change SSH port** — non-standard port (e.g., 2222) reduces noise
-- **SSH key**: Ed25519 keys only
+### 6.5 Downtime Policy
 
-### Firewall (ufw)
-
-```
-Allow: 443/tcp (HTTPS — Cloudflare IPs only)
-Allow: 2222/tcp (SSH — your IP only)
-Deny: everything else
-```
-
-Port 80 not needed — Cloudflare handles HTTP→HTTPS redirect. PostgreSQL (5432), Redis (6379), Falcon (3000/3100) are localhost-only, not exposed.
-
-### Cloudflare IP Restriction
-
-Nginx should only accept connections from Cloudflare IP ranges. This prevents direct-to-IP access bypassing Cloudflare's WAF/DDoS protection.
-
-```nginx
-# /etc/nginx/conf.d/cloudflare-ips.conf
-# Updated periodically from https://www.cloudflare.com/ips/
-set_real_ip_from 173.245.48.0/20;
-set_real_ip_from 103.21.244.0/22;
-# ... (all Cloudflare ranges)
-real_ip_header CF-Connecting-IP;
-```
-
-### System Hardening
-
-- **Automatic security updates**: `unattended-upgrades` for Ubuntu security patches
-- **fail2ban**: Protect SSH against brute force
-- **No unnecessary services**: Disable anything not needed (e.g., `snapd`, `multipathd`)
-- **PostgreSQL**: Listen on localhost only (`listen_addresses = 'localhost'`)
-- **Redis**: Bind to localhost, no password needed (localhost-only access)
-- **File permissions**: Deploy user owns `/opt/dailywerk/`, PostgreSQL user owns data dir
-- **Secrets**: Rails credentials encrypted, `.env` files with `600` permissions
-
-### Application Security
-
-Covered by existing rules ([04-security.md](./../.claude/rules/04-security.md)):
-- Strong parameters, encryption, injection prevention
-- WorkOS auth, RLS isolation
-- Brakeman + bundler-audit in deploy pipeline
+- **Production**: zero-downtime is required
+- **Staging**: use the same slot-based process for parity
+- host-level Docker daemon restarts should use Docker `live-restore` to reduce accidental container interruption during daemon maintenance
 
 ---
 
-## 7. Backup & Recovery
+## 7. Security and Hardening
 
-### What Gets Backed Up
+### Host
+
+- Debian automatic security updates enabled
+- SSH key only
+- root login disabled
+- SSH on a non-default port
+- `ufw` allows:
+  - 443/tcp from Cloudflare IP ranges
+  - SSH from admin IPs only
+- `fail2ban` protects SSH
+
+### Docker
+
+- containers run as non-root where practical
+- root filesystem read-only where practical
+- only Nginx and Grafana are exposed externally
+- PostgreSQL and Valkey are available only on the internal Docker network
+- GHCR credentials are read-only and stored outside the repo
+
+### Application
+
+- production/staging secrets are separate
+- webhook signatures are verified
+- container images are immutable and referenced by exact tag or digest for deploys
+- health and readiness endpoints are distinct so Nginx never switches early
+
+---
+
+## 8. Backups and Recovery
+
+### 8.1 Backup Requirements
+
+Backups must be:
+
+- encrypted at rest
+- compressed
+- copied off-host to Hetzner Object Storage
+- restorable without rebuilding the entire server manually
+
+### 8.2 Backup Design
 
 | Data | Method | Frequency | Retention |
 |------|--------|-----------|----------|
-| PostgreSQL (both DBs) | `pg_dump` → compressed file | Every 6 hours | 7 days local, 30 days S3 |
-| Vault data (`/data/workspaces/`) | rsync to backup dir | Daily | 7 days local, 30 days S3 |
-| Rails credentials + .env | Encrypted copy to S3 | On change | Latest 3 versions |
-| Nginx config | Part of system backup | Weekly | 4 weeks |
-| Full system | Hetzner snapshot | Weekly | 4 snapshots |
+| PostgreSQL | `pg_dump -Fc` into restic repository | every 6 hours | 7 days hot, 30 days object storage |
+| Workspace and vault data | restic backup with compression enabled | daily | 30 days object storage |
+| Nginx, Grafana, compose config, env files | restic backup with compression enabled | daily | 30 days object storage |
+| Docker volumes for Grafana/Loki/Prometheus | restic backup | daily | 14–30 days |
+| Full server image | Hetzner snapshot | weekly | 4 snapshots |
 
-### Backup Script
+### 8.3 Why Restic
 
-```bash
-#!/bin/bash
-# /opt/dailywerk/scripts/backup.sh
-# Run via systemd timer every 6 hours
+- encrypted repositories are a first-class feature
+- compression is available for repository format v2
+- a single tool can cover object storage backups for configs, workspaces, and database dumps
 
-set -euo pipefail
+### 8.4 Restore Modes
 
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="/var/backups/dailywerk"
-S3_BUCKET="dailywerk-backups"
+| Scenario | Recovery Path |
+|----------|---------------|
+| app image failure | switch traffic back to previous slot |
+| bad deploy after switch | redeploy prior immutable image tag to inactive slot and flip back |
+| DB corruption | restore latest verified dump into a fresh DB or replace the DB volume |
+| full host loss | provision new Hetzner host, restore compose configs and secrets, restore DB/workspaces from restic, redeploy latest images |
 
-# PostgreSQL dumps
-for db in dailywerk_production dailywerk_staging; do
-  pg_dump -Fc "$db" > "$BACKUP_DIR/pg_${db}_${TIMESTAMP}.dump"
-done
+### 8.5 Recovery Targets
 
-# Upload to Hetzner Object Storage
-for f in "$BACKUP_DIR"/pg_*_${TIMESTAMP}.dump; do
-  aws s3 cp "$f" "s3://$S3_BUCKET/postgres/$(basename $f)" \
-    --endpoint-url https://fsn1.your-objectstorage.com
-done
-
-# Clean local backups older than 7 days
-find "$BACKUP_DIR" -name "pg_*.dump" -mtime +7 -delete
-
-# Clean S3 backups older than 30 days
-aws s3 ls "s3://$S3_BUCKET/postgres/" --endpoint-url https://fsn1.your-objectstorage.com \
-  | awk '{print $4}' | while read f; do
-    # ... age check and delete
-  done
-```
-
-### Recovery Procedures
-
-#### Database Restore
-
-```bash
-# Stop application
-systemctl stop dailywerk-prod-falcon dailywerk-prod-worker
-
-# Restore from dump
-pg_restore -d dailywerk_production -c /var/backups/dailywerk/pg_dailywerk_production_TIMESTAMP.dump
-
-# Restart
-systemctl start dailywerk-prod-falcon dailywerk-prod-worker
-```
-
-#### Full Server Recovery (Disaster)
-
-1. Create new Hetzner Cloud server (same spec)
-2. Restore from Hetzner snapshot (if recent enough) — done
-3. Or: fresh Ubuntu install → run Claude Code automation scripts → restore DB from S3 backup → deploy latest code from GitHub
-
-**RTO target**: <1 hour from snapshot, <2 hours from scratch.
+- **RTO**: under 15 minutes for app rollback, under 2 hours for host rebuild
+- **RPO**: up to 6 hours for DB, up to 24 hours for workspace files unless higher frequency is later required
 
 ---
 
-## 8. Logging, Monitoring & Metrics
+## 9. Logging, Monitoring, and Metrics
 
-All local. No external SaaS dependencies.
+### 9.1 Mandatory Stack
 
-### Logging
+| Need | Tool |
+|------|------|
+| metrics storage and alert evaluation | Prometheus |
+| dashboards and web UI | Grafana |
+| log storage | Loki |
+| log shipping | Promtail |
+| host metrics | node_exporter |
+| container metrics | cAdvisor |
+| PostgreSQL metrics | postgres_exporter |
+| Valkey metrics | valkey_exporter |
 
-| Source | Destination | Format |
-|--------|-------------|--------|
-| Falcon (Rails) | journald + `/var/log/dailywerk/prod/rails.log` | Tagged JSON (request_id) |
-| GoodJob Worker | journald + `/var/log/dailywerk/prod/worker.log` | Rails logger |
-| Nginx | `/var/log/nginx/dailywerk-*.log` | Combined + JSON access log |
-| PostgreSQL | `/var/log/postgresql/` | Default pg_log |
-| System | journald | Default |
+### 9.2 Log Viewer Requirement
 
-### Log Rotation
+The OSS web log viewer requirement is satisfied by:
 
-```
-# /etc/logrotate.d/dailywerk
-/var/log/dailywerk/*/*.log {
-    daily
-    rotate 14
-    compress
-    delaycompress
-    missingok
-    notifempty
-    copytruncate
-}
+- Grafana Explore for the UI
+- Loki for indexed log queries
+- Promtail for collecting container, Nginx, and host logs
 
-/var/log/nginx/dailywerk-*.log {
-    daily
-    rotate 14
-    compress
-    delaycompress
-    missingok
-    notifempty
-    create 0640 www-data adm
-    sharedscripts
-    postrotate
-        [ -s /run/nginx.pid ] && kill -USR1 $(cat /run/nginx.pid)
-    endscript
-}
-```
+This keeps metrics and logs in the same admin interface instead of splitting the operational surface across multiple tools.
 
-### Monitoring (Local)
+### 9.3 Access Model
 
-**Health checks via systemd + simple script:**
+- Grafana is published at `https://ops.dailywerk.com`
+- access is restricted with admin auth and optionally Cloudflare Access or IP allowlisting
+- Grafana has separate dashboards for:
+  - production app
+  - staging app
+  - PostgreSQL
+  - Valkey
+  - Nginx
+  - Docker host
 
-```bash
-#!/bin/bash
-# /opt/dailywerk/scripts/healthcheck.sh
-# Run via systemd timer every 1 minute
+### 9.4 Alerting
 
-# Check Rails is responding
-curl -sf https://app.dailywerk.com/up > /dev/null || echo "ALERT: Rails down" >> /var/log/dailywerk/alerts.log
+Grafana alerting should send notifications to at least one of:
 
-# Check disk usage
-DISK_USAGE=$(df / --output=pcent | tail -1 | tr -d ' %')
-[ "$DISK_USAGE" -gt 85 ] && echo "ALERT: Disk usage ${DISK_USAGE}%" >> /var/log/dailywerk/alerts.log
+- email
+- Telegram
+- webhook receiver for future automation
 
-# Check PostgreSQL
-pg_isready -q || echo "ALERT: PostgreSQL down" >> /var/log/dailywerk/alerts.log
+At minimum, alerts are required for:
 
-# Check Redis
-redis-cli ping > /dev/null 2>&1 || echo "ALERT: Redis down" >> /var/log/dailywerk/alerts.log
-
-# Check memory
-FREE_MEM=$(free -m | awk '/Mem:/ {print $7}')
-[ "$FREE_MEM" -lt 512 ] && echo "ALERT: Low memory (${FREE_MEM}MB available)" >> /var/log/dailywerk/alerts.log
-```
-
-**Optional: Lightweight metrics with node_exporter + Prometheus + Grafana (all local)**
-
-If richer dashboards are wanted later, all three run on the same server:
-- `node_exporter` → system metrics (CPU, RAM, disk, network)
-- `prometheus` → scrapes node_exporter + Rails `/metrics` endpoint
-- `grafana` → dashboards on localhost:3001, accessed via SSH tunnel
-
-This is optional for MVP. The health check script + journald is sufficient to start.
-
-### Alerting
-
-For MVP, alerts go to a log file. When email/Telegram notifications are wanted:
-- The health check script sends alerts via the Telegram Bot API (DailyWerk's own bot)
-- Or: a simple SMTP send to the admin email
-- Or: write to a file that Claude Code on the server can monitor and act on
+- app readiness failure
+- high 5xx rate
+- low disk space
+- PostgreSQL unavailable
+- Valkey unavailable
+- backup failure
+- Loki or Prometheus down
 
 ---
 
-## 9. Resource Limits
+## 10. Resource Model
 
-### systemd Resource Controls
+### Recommended Budget on CPX41
 
-```ini
-# Production Falcon
-MemoryMax=4G
-CPUQuota=300%
+| Service Group | Approx Memory Budget |
+|---------------|----------------------|
+| PostgreSQL + pgvector | 4–6 GB |
+| Valkey | 256–512 MB |
+| active app slot | 2–4 GB |
+| inactive slot during rollout | 2–4 GB |
+| Prometheus + Grafana + Loki | 2–3 GB |
+| Nginx + exporters + deploy-listener | <1 GB |
 
-# Production GoodJob Worker
-MemoryMax=3G
-CPUQuota=200%
-
-# Staging Falcon
-MemoryMax=1G
-CPUQuota=100%
-
-# Staging GoodJob Worker
-MemoryMax=1G
-CPUQuota=100%
-
-# PostgreSQL (managed by pg config, not systemd)
-# shared_buffers = 4GB, effective_cache_size = 8GB (for 16GB server)
-```
-
-### PostgreSQL Tuning (for 16 GB RAM server)
-
-```
-shared_buffers = 4GB
-effective_cache_size = 8GB
-work_mem = 64MB
-maintenance_work_mem = 512MB
-max_connections = 100
-max_wal_size = 2GB
-checkpoint_completion_target = 0.9
-random_page_cost = 1.1  # NVMe
-```
-
-### Redis Tuning
-
-```
-maxmemory 512mb
-maxmemory-policy allkeys-lru
-```
+This still leaves operating margin for Docker cache, filesystem cache, and burst usage during deploys.
 
 ---
 
-## 10. Claude Code on Server
+## 11. Claude Code on the Server
 
-Claude Code is installed on the server for operational automation:
-- Running deployment scripts
-- Investigating production issues (log analysis, query debugging)
-- Applying security patches and updates
-- Running backup verification
+Claude Code is an operator tool, not a runtime dependency.
 
-**Access**: Via SSH into the deploy user account. Claude Code runs with the deploy user's permissions — no root access.
+Use cases:
 
-**API key**: Stored in the deploy user's environment, not in the application's `.env`.
+- inspect logs and dashboards during incidents
+- assist with restores and rollback drills
+- update compose definitions and hardening scripts
+- validate backup restores in staging
+
+Rules:
+
+- Claude Code runs under the deploy user
+- it should not be part of the request path
+- it should not hold long-lived production secrets beyond what the deploy user already needs
 
 ---
 
-## 11. Open Questions
+## 12. Final Decision Summary
 
-1. **Domain name**: `dailywerk.com` or different? Affects Cloudflare, Nginx, CORS, WorkOS config.
-2. **Develop branch**: Does `develop` exist today, or should we adopt it? Alternative: staging deploys from feature branches.
-3. **Email delivery**: Transactional email provider for password resets, notifications? (Postmark, Resend, or self-hosted?)
-4. **Hetzner Object Storage region**: Same datacenter as VPS (FSN1) for lowest latency to backup bucket.
-5. **Webhook vs polling for deploys**: Webhook is more responsive but needs a listener process. Polling is simpler but has 1-minute delay.
-6. **Prometheus/Grafana**: Worth the memory overhead (~500MB) for MVP, or defer?
+This PRD now assumes:
+
+1. **Debian stable**, not Ubuntu
+2. **Docker Compose**, not native app processes
+3. **PostgreSQL + pgvector and Valkey in a dedicated infra compose**
+4. **GHCR image publishing and package-publish-triggered deploy notifications**
+5. **blue/green zero-downtime deploys**
+6. **compressed and encrypted backups**
+7. **Grafana + Prometheus + Loki as required local observability**
+
+That is the baseline the RFCs must implement.

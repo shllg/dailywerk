@@ -13,378 +13,293 @@ phase: 1
 
 ## Context
 
-DailyWerk needs production-readiness changes in the Rails and React codebase before deploying to a Hetzner server. This RFC lists everything that must change in code, configuration, or project structure. No infrastructure or server-side work — that lives in the sibling RFCs.
+The deployment baseline is now Debian + Docker Compose + GHCR + blue/green slots. This RFC lists the repository changes required to support that model. It intentionally replaces the earlier native-process deploy assumptions.
+
+This RFC covers:
+
+- application configuration changes
+- Docker image build inputs
+- GitHub workflow changes
+- readiness, metrics, and logging contracts
+
+This RFC does **not** cover:
+
+- server provisioning
+- Cloudflare setup
+- live server compose operations
+
+Those live in the sibling Manual Setup and Server Automation RFCs.
 
 ---
 
-## 1. Rails Production Configuration
+## 1. Environment Contract
 
-### 1.1 Environment Variables
+### 1.1 `.env.example`
 
-Create a `.env.example` documenting all required production environment variables:
+The repo should document the runtime contract for containerized deploys.
+
+Required environment variables:
 
 ```bash
-# .env.example — Copy to .env and fill in values
-# NEVER commit .env to git
-
 # Rails
 RAILS_ENV=production
-RAILS_MASTER_KEY=           # from config/master.key
-SECRET_KEY_BASE=            # rails secret
+RAILS_MASTER_KEY=
+SECRET_KEY_BASE=
 RAILS_LOG_LEVEL=info
+RAILS_LOG_TO_STDOUT=true
+APP_ENVIRONMENT=production
+
+# HTTP / routing
+APP_HOST=app.dailywerk.com
+CORS_ORIGINS=https://app.dailywerk.com
+ACTION_CABLE_ALLOWED_ORIGINS=https://app.dailywerk.com
 
 # Database
-DATABASE_URL=postgres://dailywerk:PASSWORD@localhost:5432/dailywerk_production
+DATABASE_URL=postgres://dailywerk:password@postgres:5432/dailywerk_production
+DB_POOL=10
 
-# Redis
-REDIS_URL=redis://localhost:6379/0
+# Valkey (Redis protocol)
+VALKEY_URL=redis://valkey:6379/0
+CACHE_NAMESPACE=dailywerk:prod:cache
+CABLE_NAMESPACE=dailywerk:prod:cable
 
-# Falcon
-PORT=3000
-FALCON_COUNT=4              # Number of worker processes
+# Storage
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_ENDPOINT=
+AWS_REGION=
+S3_BUCKET=
 
-# WorkOS Auth
+# Third-party auth/billing
 WORKOS_API_KEY=
 WORKOS_CLIENT_ID=
-
-# Stripe
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 STRIPE_PUBLISHABLE_KEY=
 
-# Hetzner Object Storage (S3-compatible)
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-AWS_ENDPOINT=https://fsn1.your-objectstorage.com
-AWS_REGION=fsn1
-S3_BUCKET=dailywerk-production
-
-# OpenAI (platform key for system operations)
-OPENAI_API_KEY=
-
-# Application
-APP_HOST=app.dailywerk.com
-CORS_ORIGINS=https://app.dailywerk.com
-ACTION_CABLE_ALLOWED_ORIGINS=https://app.dailywerk.com
+# Metrics and diagnostics
+METRICS_ENABLED=true
+METRICS_BASIC_AUTH_USERNAME=
+METRICS_BASIC_AUTH_PASSWORD=
+BUILD_SHA=
+BUILD_REF=
 ```
 
-### 1.2 Production Environment Updates
+### 1.2 Naming Rule
 
-Changes to `config/environments/production.rb`:
+Use `VALKEY_URL` in the runtime contract, even though Rails still uses the Redis protocol and adapter internally. That keeps the infrastructure language accurate while avoiding confusion in operations docs.
+
+---
+
+## 2. Rails Runtime Configuration
+
+### 2.1 Production Environment
+
+Update `config/environments/production.rb` for containerized execution:
 
 ```ruby
-# Cache store — use Redis
+config.log_level = ENV.fetch("RAILS_LOG_LEVEL", "info").to_sym
+config.log_tags  = [:request_id]
+
+if ActiveModel::Type::Boolean.new.cast(ENV.fetch("RAILS_LOG_TO_STDOUT", "true"))
+  logger           = ActiveSupport::Logger.new($stdout)
+  logger.formatter = ::Logger::Formatter.new
+  config.logger    = ActiveSupport::TaggedLogging.new(logger)
+end
+
 config.cache_store = :redis_cache_store, {
-  url: ENV["REDIS_URL"],
-  namespace: "cache:#{ENV.fetch('RAILS_ENV', 'production')}"
+  url: ENV.fetch("VALKEY_URL"),
+  namespace: ENV.fetch("CACHE_NAMESPACE", "dailywerk:cache")
 }
 
-# Action Cable — Redis adapter
-config.action_cable.url = "wss://#{ENV['APP_HOST']}/cable"
-config.action_cable.allowed_request_origins = ENV.fetch("ACTION_CABLE_ALLOWED_ORIGINS", "").split(",")
+config.action_cable.url = "wss://#{ENV.fetch('APP_HOST')}/cable"
+config.action_cable.allowed_request_origins =
+  ENV.fetch("ACTION_CABLE_ALLOWED_ORIGINS", "").split(",")
 
-# Active Storage — S3
 config.active_storage.service = :hetzner
-
-# Host authorization
-config.hosts = [
-  ENV["APP_HOST"],
-  "localhost"
-].compact
-
-# Log level from env
-config.log_level = ENV.fetch("RAILS_LOG_LEVEL", "info").to_sym
+config.hosts = [ENV["APP_HOST"]].compact
 ```
 
-### 1.3 Cable Configuration
+### 2.2 Cable Configuration
 
-Update `config/cable.yml`:
+`config/cable.yml` should keep using the Redis adapter because Valkey is Redis-protocol compatible:
 
 ```yaml
-development:
-  adapter: redis
-  url: redis://localhost:<%= ENV.fetch("DAILYWERK_REDIS_PORT", 6399) %>/1
-
-test:
-  adapter: test
-
 production:
   adapter: redis
-  url: <%= ENV.fetch("REDIS_URL", "redis://localhost:6379/1") %>
-  channel_prefix: dailywerk_<%= Rails.env %>
+  url: <%= ENV.fetch("VALKEY_URL") %>
+  channel_prefix: <%= ENV.fetch("CABLE_NAMESPACE", "dailywerk:cable") %>
 ```
 
-### 1.4 Storage Configuration
+### 2.3 GoodJob
 
-Update `config/storage.yml`:
-
-```yaml
-local:
-  service: Disk
-  root: <%= Rails.root.join("storage") %>
-
-hetzner:
-  service: S3
-  access_key_id: <%= ENV["AWS_ACCESS_KEY_ID"] %>
-  secret_access_key: <%= ENV["AWS_SECRET_ACCESS_KEY"] %>
-  endpoint: <%= ENV["AWS_ENDPOINT"] %>
-  region: <%= ENV.fetch("AWS_REGION", "fsn1") %>
-  bucket: <%= ENV["S3_BUCKET"] %>
-  force_path_style: true
-```
-
-### 1.5 CORS Configuration
-
-Update `config/initializers/cors.rb`:
-
-```ruby
-Rails.application.config.middleware.insert_before 0, Rack::Cors do
-  allow do
-    origins(*ENV.fetch("CORS_ORIGINS", "http://localhost:5173").split(","))
-
-    resource "*",
-      headers: :any,
-      methods: [:get, :post, :put, :patch, :delete, :options, :head],
-      expose: ["Authorization"],
-      credentials: true
-  end
-end
-```
-
-### 1.6 GoodJob Production Config
-
-Verify `config/initializers/good_job.rb` sets external mode for production:
+GoodJob must remain in external mode:
 
 ```ruby
 config.good_job.execution_mode = :external
 ```
 
-This is already specified in [PRD 04 §8](../prd/04-billing-and-operations.md#8-goodjob-configuration). Ensure no environment override changes it.
+The worker container is the external executor; no inline or async fallback is acceptable.
 
 ---
 
-## 2. Database Configuration
+## 3. Readiness, Health, and Metrics
 
-### 2.1 Production Database User
+### 3.1 Distinguish Liveness from Readiness
 
-The application must connect as a non-superuser role where RLS is expected to enforce isolation (per [PRD 01 §4.2](../prd/01-platform-and-infrastructure.md#42-postgresql-row-level-security)).
+The existing `/up` endpoint is not enough for blue/green switching. Add a readiness endpoint such as `/ready` that checks:
 
-Add a setup task or migration that creates the `app_user` role:
+- DB connectivity
+- Valkey connectivity
+- any required pending-migration guard
 
-```ruby
-# db/seeds/production_setup.rb (run once, manually)
-# Or as a standalone Rake task: bin/rails db:create_app_user
+The deploy listener and Nginx switch logic should use `/ready`, not `/up`.
 
-ActiveRecord::Base.connection.execute(<<~SQL)
-  DO $$
-  BEGIN
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN
-      CREATE ROLE app_user WITH LOGIN PASSWORD 'from_env_var';
-    END IF;
-  END
-  $$;
+### 3.2 Metrics Endpoint
 
-  GRANT CONNECT ON DATABASE dailywerk_production TO app_user;
-  GRANT USAGE ON SCHEMA public TO app_user;
-  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
-  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT USAGE, SELECT ON SEQUENCES TO app_user;
-SQL
-```
+Prometheus is mandatory, so the app needs an explicit metrics strategy.
 
-The `DATABASE_URL` in production `.env` should use this `app_user` role, not the superuser `postgres`.
+Recommended change:
 
-### 2.2 Database Connection Pool
+- add a Prometheus-compatible exporter path such as `/metrics`
+- include request duration/count, ActiveRecord pool state, GoodJob queue depth, and Action Cable connection metrics where practical
+- protect the endpoint with internal-only network access or basic auth at Nginx
 
-Update `config/database.yml` to respect `DATABASE_URL` and connection pool:
+### 3.3 Structured Logs to STDOUT
 
-```yaml
-production:
-  <<: *default
-  url: <%= ENV["DATABASE_URL"] %>
-  pool: <%= ENV.fetch("DB_POOL", 10) %>
-  prepared_statements: true
-```
+Container logs should go to stdout/stderr, not app-specific files. The app should emit parseable structured logs so Promtail/Loki can label and query them cleanly.
+
+At minimum:
+
+- request ID
+- environment
+- controller/action or job name
+- severity
+- timestamp
 
 ---
 
-## 3. Frontend Build Configuration
+## 4. Container Images
 
-### 3.1 Vite Production Build
+### 4.1 Required Dockerfiles
 
-The frontend needs environment-aware API base URL configuration.
+The repo should define at least:
 
-```typescript
-// frontend/src/config.ts
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
-export const WS_URL = import.meta.env.VITE_WS_URL || `wss://${window.location.host}/cable`
-```
+- `Dockerfile.api`
+- `Dockerfile.frontend`
+- optionally `docker/postgres-pgvector/Dockerfile` if the team chooses to publish its own PostgreSQL+pgvector image to GHCR
 
-Ensure `frontend/.env.production` exists:
+### 4.2 API Image Requirements
 
-```bash
-VITE_API_BASE_URL=
-VITE_WS_URL=
-```
+The API image should:
 
-When empty, the SPA uses the same origin (served by Nginx), which is the correct production behavior — API calls go to `/api/v1/...` on the same domain.
+- install production gems only
+- run as a non-root user
+- provide commands for:
+  - API server
+  - worker
+  - one-off migration job
+- include a healthcheck/readiness script
 
-### 3.2 Build Output
+### 4.3 Frontend Image Requirements
 
-`pnpm build` outputs to `frontend/dist/`. Nginx serves this directly. No Rails asset pipeline involved.
+The frontend image should:
 
-### 3.3 .gitignore
+- build the Vite app in a builder stage
+- serve static assets from a minimal runtime image
+- expose a health endpoint or at least a deterministic `index.html` response for Nginx probing
 
-Ensure `frontend/dist/` is in `.gitignore` — it's built on the server during deploy, not committed.
+### 4.4 `.dockerignore`
 
----
-
-## 4. Deploy Script
-
-Create a deploy script in the repository:
-
-```bash
-#!/bin/bash
-# bin/deploy
-# Usage: bin/deploy [production|staging]
-# Run on the server, not locally
-
-set -euo pipefail
-
-ENVIRONMENT="${1:-production}"
-APP_DIR="/opt/dailywerk/${ENVIRONMENT}"
-SYSTEMD_PREFIX="dailywerk-${ENVIRONMENT}"
-
-echo "==> Deploying ${ENVIRONMENT} from $(git rev-parse --short HEAD)"
-
-cd "$APP_DIR"
-
-# Pull latest code
-git fetch origin
-case "$ENVIRONMENT" in
-  production) git checkout master && git pull --ff-only origin master ;;
-  staging)    git checkout develop && git pull --ff-only origin develop ;;
-esac
-
-# Backend dependencies
-bundle config set --local deployment true
-bundle config set --local without 'development test'
-bundle install --jobs 4
-
-# Database migration
-RAILS_ENV="$ENVIRONMENT" bin/rails db:migrate
-
-# Frontend build
-cd frontend
-pnpm install --frozen-lockfile
-pnpm build
-cd ..
-
-# Restart services
-sudo systemctl restart "${SYSTEMD_PREFIX}-falcon"
-sudo systemctl restart "${SYSTEMD_PREFIX}-worker"
-
-# Health check
-sleep 3
-if curl -sf "http://localhost:${PORT:-3000}/up" > /dev/null; then
-  echo "==> Deploy successful ($(git rev-parse --short HEAD))"
-else
-  echo "==> HEALTH CHECK FAILED — check logs"
-  exit 1
-fi
-```
-
-Make executable: `chmod +x bin/deploy`.
+Add a strict `.dockerignore` to keep build contexts small and avoid leaking local data into images.
 
 ---
 
-## 5. Webhook Receiver (Optional)
+## 5. Deployment Artifacts in the Repo
 
-If using webhook-based deploys, add a lightweight receiver:
+The deployment model should be versioned with the application code.
 
-```bash
-# bin/webhook-deploy
-# Receives GitHub webhook, verifies signature, triggers deploy
-# Uses the `webhook` tool (https://github.com/adnanh/webhook)
-# Config in /opt/dailywerk/webhook.json
-```
+Recommended repo paths:
 
-The webhook config and systemd unit live on the server, not in the codebase. The receiver only needs to verify the GitHub signature and call `bin/deploy`.
+- `deploy/compose/infra.yml`
+- `deploy/compose/observability.yml`
+- `deploy/compose/edge.yml`
+- `deploy/compose/app-slot.yml`
+- `deploy/nginx/templates/*.conf`
+- `deploy/scripts/switch-slot.sh`
+- `deploy/scripts/run-migrations.sh`
 
----
-
-## 6. Health Check Endpoint
-
-The existing `/up` endpoint from Rails health check is sufficient. Verify it's accessible:
-
-```ruby
-# config/routes.rb — already present
-get "up" => "rails/health#show", as: :rails_health_check
-```
-
-No changes needed unless we want richer health data (DB connectivity, Redis, disk space). Defer for now.
+The server automation RFC can call these files, but they should live in the repo so changes are reviewed alongside app changes.
 
 ---
 
-## 7. Procfile.prod
+## 6. GitHub Actions / GHCR
 
-Create a production Procfile for reference (systemd units are the actual process manager, but this documents what runs):
+### 6.1 Build and Publish Workflows
 
-```
-# Procfile.prod — Reference only. Systemd manages these in production.
-api: bundle exec falcon serve --bind http://localhost:${PORT:-3000} --count ${FALCON_COUNT:-4}
-worker: bundle exec good_job start
-```
+The repo should gain workflows that:
 
----
+- build frontend and API images
+- push them to GHCR
+- publish immutable tags for each commit
+- publish channel tags for `master` and `develop`
 
-## 8. .gitignore Updates
+### 6.2 Deploy Notification Workflow
 
-Ensure these are in `.gitignore`:
+The repo should also define a workflow triggered by `registry_package` publish events or the end of the image-publish workflow. That workflow sends a signed deploy webhook to the server so the host never builds from source.
 
-```
-# Environment files
-.env
-.env.production
-.env.staging
+Expected inputs:
 
-# Frontend build output
-frontend/dist/
+- environment (`production` or `staging`)
+- API image tag or digest
+- frontend image tag or digest
+- build SHA
 
-# Bundle deployment
-vendor/bundle/
+### 6.3 Recommended Image Metadata
 
-# Rails
-tmp/
-log/
-storage/
-```
+Add OCI labels to images:
 
----
+- source repository
+- commit SHA
+- branch/ref
+- build timestamp
 
-## 9. Implementation Checklist
-
-1. [ ] Create `.env.example` with all required variables
-2. [ ] Update `config/environments/production.rb` (cache, cable, storage, hosts)
-3. [ ] Update `config/cable.yml` (Redis adapter for production)
-4. [ ] Update `config/storage.yml` (Hetzner S3)
-5. [ ] Update `config/initializers/cors.rb` (env-driven origins)
-6. [ ] Create `frontend/src/config.ts` and `frontend/.env.production`
-7. [ ] Create `bin/deploy` script
-8. [ ] Create `Procfile.prod`
-9. [ ] Update `.gitignore`
-10. [ ] Verify GoodJob external mode is set for production
-11. [ ] Add database `app_user` creation task/documentation
+This makes rollback and incident tracing simpler.
 
 ---
 
-## 10. What This RFC Does NOT Change
+## 7. Storage and External Services
 
-- No Docker/container changes — production runs natively
-- No CI/CD pipeline definition — deploy is triggered by webhook or manual script
-- No Nginx config — that's server-side setup (RFC: Manual Setup)
-- No systemd units — that's server-side setup (RFC: Server Automation)
-- No new gem dependencies
+### 7.1 Active Storage
+
+`config/storage.yml` should keep using Hetzner Object Storage via S3-compatible config.
+
+### 7.2 Database User Model
+
+The production `DATABASE_URL` should use the non-superuser application role so RLS assumptions remain valid in containers exactly as they would natively.
+
+---
+
+## 8. Implementation Checklist
+
+1. [ ] add `.env.example` for the container runtime contract
+2. [ ] switch production cache/cable settings to `VALKEY_URL`
+3. [ ] enable stdout-first structured logging
+4. [ ] add `/ready` endpoint for blue/green slot cutover
+5. [ ] add `/metrics` strategy for Prometheus
+6. [ ] add Dockerfiles for API and frontend images
+7. [ ] add `.dockerignore`
+8. [ ] add versioned deployment manifests and slot-switch scripts
+9. [ ] add GHCR build/publish workflows
+10. [ ] add deploy-notification workflow
+11. [ ] verify GoodJob remains external-only
+
+---
+
+## 9. What This RFC No Longer Assumes
+
+- no host-level `bundle install` during deploy
+- no host-level `pnpm build` during deploy
+- no `bin/deploy` script that pulls git and restarts native services
+- no host-native Redis terminology in ops docs
+- no restart-based app deploys
