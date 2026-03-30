@@ -20,6 +20,8 @@ gem "rack-cors"
 # Active Storage S3
 gem "aws-sdk-s3", require: false
 gem "image_processing", "~> 1.2"
+gem "ruby_llm", "~> 1.14"
+gem "ruby_llm-responses_api", "~> 0.5"
 
 gem "tzinfo-data", platforms: %i[windows jruby]
 gem "bootsnap", require: false

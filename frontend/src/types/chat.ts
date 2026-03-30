@@ -2,9 +2,9 @@ export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
-  agentName?: string
   timestamp: string
   status: 'sending' | 'sent' | 'streaming' | 'error'
+  agentName?: string
   toolCalls?: ToolCall[]
   thinkingContent?: string
 }
@@ -17,18 +17,13 @@ export interface ToolCall {
   status: 'pending' | 'running' | 'completed' | 'error'
 }
 
-export interface Session {
-  id: string
-  title: string
-  lastMessage?: string
-  lastMessageAt: string
-  agentName: string
-  messageCount: number
-}
-
 export interface Agent {
   slug: string
   name: string
-  description: string
-  color: string
+}
+
+export interface ChatState {
+  sessionId: string
+  agent: Agent
+  messages: Message[]
 }

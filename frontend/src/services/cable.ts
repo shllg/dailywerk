@@ -1,5 +1,5 @@
 import { createConsumer } from '@rails/actioncable'
 
-const consumer = createConsumer('/cable')
-
-export default consumer
+export function createAuthenticatedConsumer(token: string) {
+  return createConsumer(`/cable?token=${encodeURIComponent(token)}`)
+}

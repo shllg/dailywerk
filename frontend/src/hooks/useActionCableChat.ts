@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import type { Message } from '../types/chat'
-import consumer from '../services/cable'
+import { createAuthenticatedConsumer } from '../services/cable'
+import { sendMessage as sendChatMessage } from '../services/chatApi'
 
 interface CableEvent {
   type:
@@ -21,11 +29,13 @@ export interface UseActionCableChatReturn {
   isStreaming: boolean
   activeAgent: string | null
   sendMessage: (content: string) => void
-  setMessages: React.Dispatch<React.SetStateAction<Message[]>>
+  setMessages: Dispatch<SetStateAction<Message[]>>
 }
 
 export function useActionCableChat(
   sessionId: string | null,
+  token: string | null,
+  defaultAgentName: string | null,
 ): UseActionCableChatReturn {
   const [messages, setMessages] = useState<Message[]>([])
   const [streamingContent, setStreamingContent] = useState('')
@@ -33,56 +43,88 @@ export function useActionCableChat(
     null,
   )
   const [isStreaming, setIsStreaming] = useState(false)
-  const [activeAgent, setActiveAgent] = useState<string | null>(null)
+  const [activeAgent, setActiveAgent] = useState<string | null>(
+    defaultAgentName,
+  )
+  const streamingContentRef = useRef('')
+  const streamingMessageIdRef = useRef<string | null>(null)
+  const activeAgentRef = useRef<string | null>(defaultAgentName)
   const thinkingRef = useRef('')
 
+  const resetStreamingState = useCallback(() => {
+    setStreamingContent('')
+    setStreamingMessageId(null)
+    setIsStreaming(false)
+    streamingContentRef.current = ''
+    streamingMessageIdRef.current = null
+    thinkingRef.current = ''
+  }, [])
+
   useEffect(() => {
-    if (!sessionId) return
+    activeAgentRef.current = defaultAgentName
+    setActiveAgent(defaultAgentName)
+  }, [defaultAgentName])
+
+  useEffect(() => {
+    if (!sessionId || !token) return
+
+    const consumer = createAuthenticatedConsumer(token)
 
     const subscription = consumer.subscriptions.create(
       { channel: 'SessionChannel', session_id: sessionId },
       {
+        disconnected() {
+          resetStreamingState()
+        },
         received(event: CableEvent) {
           switch (event.type) {
             case 'token': {
-              const delta = event.delta as string
-              setStreamingContent((prev) => prev + delta)
-              if (!streamingMessageId) {
-                setStreamingMessageId(
-                  (event.message_id as string) || crypto.randomUUID(),
-                )
+              const delta = typeof event.delta === 'string' ? event.delta : ''
+              if (!delta) {
+                break
               }
+
+              const messageId =
+                (event.message_id as string) ||
+                streamingMessageIdRef.current ||
+                crypto.randomUUID()
+
+              const nextContent = streamingContentRef.current + delta
+              streamingMessageIdRef.current = messageId
+              streamingContentRef.current = nextContent
+              setStreamingMessageId(messageId)
+              setStreamingContent(nextContent)
               setIsStreaming(true)
               break
             }
 
             case 'complete': {
               const finalContent =
-                (event.content as string) || streamingContent
+                (event.content as string) || streamingContentRef.current
               const messageId =
                 (event.message_id as string) ||
-                streamingMessageId ||
+                streamingMessageIdRef.current ||
                 crypto.randomUUID()
 
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: messageId,
-                  role: 'assistant',
-                  content: finalContent,
-                  agentName: activeAgent || undefined,
-                  timestamp: new Date().toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  }),
-                  status: 'sent',
-                  thinkingContent: thinkingRef.current || undefined,
-                },
-              ])
-              setStreamingContent('')
-              setStreamingMessageId(null)
-              setIsStreaming(false)
-              thinkingRef.current = ''
+              if (finalContent) {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: messageId,
+                    role: 'assistant',
+                    content: finalContent,
+                    agentName: activeAgentRef.current || undefined,
+                    timestamp: new Date().toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    }),
+                    status: 'sent',
+                    thinkingContent: thinkingRef.current || undefined,
+                  },
+                ])
+              }
+
+              resetStreamingState()
               break
             }
 
@@ -94,7 +136,7 @@ export function useActionCableChat(
                   id: crypto.randomUUID(),
                   role: 'assistant',
                   content: errorMsg,
-                  agentName: activeAgent || undefined,
+                  agentName: activeAgentRef.current || undefined,
                   timestamp: new Date().toLocaleTimeString([], {
                     hour: '2-digit',
                     minute: '2-digit',
@@ -102,15 +144,13 @@ export function useActionCableChat(
                   status: 'error',
                 },
               ])
-              setStreamingContent('')
-              setStreamingMessageId(null)
-              setIsStreaming(false)
-              thinkingRef.current = ''
+              resetStreamingState()
               break
             }
 
             case 'agent_handoff': {
               const newAgent = event.agent as string
+              activeAgentRef.current = newAgent
               setActiveAgent(newAgent)
               setMessages((prev) => [
                 ...prev,
@@ -148,11 +188,9 @@ export function useActionCableChat(
 
     return () => {
       subscription.unsubscribe()
+      consumer.disconnect()
     }
-    // streamingContent and streamingMessageId are refs in the closure,
-    // we only want to re-subscribe when sessionId changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId])
+  }, [resetStreamingState, sessionId, token])
 
   const sendMessage = useCallback(
     (content: string) => {
@@ -170,12 +208,22 @@ export function useActionCableChat(
       }
       setMessages((prev) => [...prev, userMessage])
 
-      consumer.subscriptions.subscriptions
-        .find(
-          (s: { identifier: string }) =>
-            JSON.parse(s.identifier).channel === 'SessionChannel',
-        )
-        ?.perform('receive', { message: content })
+      void sendChatMessage(content).catch(() => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: 'Failed to send message. Please try again.',
+            agentName: activeAgentRef.current || undefined,
+            timestamp: new Date().toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+            status: 'error',
+          },
+        ])
+      })
     },
     [sessionId],
   )

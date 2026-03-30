@@ -19,6 +19,7 @@ declare module '@rails/actioncable' {
   }
 
   interface Consumer {
+    disconnect(): void
     subscriptions: Subscriptions
   }
 
