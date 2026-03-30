@@ -98,7 +98,7 @@ Routes by task type, user plan, agent config overrides, provider health. Falls b
 2. **Execute**: Proceed with the LLM call. Usage is recorded in `usage_records`.
 3. **Reconcile**: `CreditReconcilerJob` (every 4 hours) compares reserved vs actual costs. Adjusts balance for over/under-estimates.
 
-For high-concurrency scenarios, use Redis as an in-memory accumulator (`DECRBY user:{id}:balance estimated`) with periodic flush to PostgreSQL. This avoids row-level lock contention on `credit_balances`.
+For high-concurrency scenarios, use Valkey as an in-memory accumulator (`DECRBY user:{id}:balance estimated`) with periodic flush to PostgreSQL. This avoids row-level lock contention on `credit_balances`.
 
 ---
 
@@ -379,7 +379,7 @@ class McpClientManager
   # Cache clients per-process to reuse connections (MCP servers are stateful)
   # WARNING: This cache is process-scoped. Under Falcon (multi-process),
   # config invalidation only clears the current process's cache.
-  # Use Redis pub/sub for cross-process invalidation in production.
+  # Use Valkey pub/sub for cross-process invalidation in production.
   CLIENTS = Concurrent::Map.new
 
   def self.clients_for(user:)
@@ -643,7 +643,7 @@ end
 # Gemfile
 gem "rails", "~> 8.0"
 gem "pg", "~> 1.5"
-gem "redis", "~> 5.0"
+gem "redis", "~> 5.0"  # Valkey-compatible
 gem "falcon", "~> 0.48"
 
 # LLM
@@ -676,9 +676,9 @@ gem "strong_migrations", "~> 2.0"
 
 ## 10. Open Questions
 
-1. **Rate limiting** — Per-user request rate (requests/minute) in Redis. Per-provider rate limiting to respect API quotas. `BudgetEnforcer` handles cost caps but not request rate.
+1. **Rate limiting** — Per-user request rate (requests/minute) in Valkey. Per-provider rate limiting to respect API quotas. `BudgetEnforcer` handles cost caps but not request rate.
 2. **Error handling / retry strategy** — LLM call failures, provider timeout, rate limit responses. GoodJob supports `retry_on` with backoff. Implement provider failover in LLM router. Handle partial streaming failures (if streaming fails at 80%, partial content may be lost).
-3. **MCP client cross-process invalidation** — `Concurrent::Map` cache is process-scoped. Need Redis pub/sub for cross-process invalidation under Falcon multi-process.
+3. **MCP client cross-process invalidation** — `Concurrent::Map` cache is process-scoped. Need Valkey pub/sub for cross-process invalidation under Falcon multi-process.
 4. **ReAct loop JSON failures** — When LLM outputs invalid tool JSON, need retry mechanism (feed parse error back to LLM, cap retries at 3).
 5. **Dual cost tracking schema** — Decide whether to extend `usage_records` with `request_type` discrimination or create a separate `api_usage_records` table for non-token costs.
-6. **Credit reservation Redis vs Postgres** — Evaluate whether Redis DECRBY is needed for concurrency, or if Postgres atomic UPDATE is sufficient for MVP scale.
+6. **Credit reservation Valkey vs Postgres** — Evaluate whether Valkey DECRBY is needed for concurrency, or if Postgres atomic UPDATE is sufficient for MVP scale.

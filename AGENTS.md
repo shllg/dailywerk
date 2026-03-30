@@ -22,7 +22,7 @@
 
 - Ruby 4.0.2, Rails 8.1.3
 - Node >= 22 (for frontend + Obsidian Headless)
-- PostgreSQL 17 + pgvector, Redis 7
+- PostgreSQL 17 + pgvector, Valkey 8
 - Falcon (API server) + GoodJob (external worker) + Vite (frontend dev)
 - Docker Compose for local services: `docker compose up -d`
 - Start all: `bin/dev` (Procfile.dev: falcon + good_job + vite)

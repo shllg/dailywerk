@@ -4,7 +4,7 @@ Rails 8.1 API + React 19 SPA for daily work management.
 
 ## Stack
 
-- **Backend**: Ruby 4.0, Rails 8.1 (API-only), PostgreSQL 17, Redis 7, GoodJob
+- **Backend**: Ruby 4.0, Rails 8.1 (API-only), PostgreSQL 17, Valkey 8, GoodJob
 - **Frontend**: React 19, TypeScript, Vite 8
 - **Storage**: RustFS (S3-compatible)
 

@@ -6,7 +6,7 @@ DB_PASSWORD=password
 DB_APP_PASSWORD=dailywerk_app_password
 # DB_NAME=dailywerk_development          # Override for worktrees
 
-# Redis (cache)
+# Valkey (Redis-compatible, cache + pub/sub)
 REDIS_URL=redis://localhost:6399/0
 # CABLE_REDIS_URL=redis://localhost:6399/1  # ActionCable (defaults to REDIS_URL)
 # CABLE_PREFIX=dailywerk_development        # ActionCable channel prefix

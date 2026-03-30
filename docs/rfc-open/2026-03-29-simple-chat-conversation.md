@@ -46,7 +46,7 @@ The goal is a working chat interface where a user can have a generic conversatio
 ## 1. Prerequisites
 
 - **User + Workspace models** exist with authentication and workspace scoping (`Current.workspace`, `WorkspaceScoped` concern, RLS via `app.current_workspace_id`)
-- **Redis** running (docker-compose provides it on port 6399)
+- **Valkey** running (docker-compose provides it on port 6399)
 - **Gems added to Gemfile**: `ruby_llm ~> 1.14`, `ruby_llm-responses_api ~> 0.5`
 - **OpenAI API key** in Rails credentials (`rails credentials:edit`): `openai_api_key: sk-...`
 
@@ -415,7 +415,7 @@ class ChatStreamJob < ApplicationJob
 end
 ```
 
-**Cross-process broadcasting**: `ActionCable.server.broadcast` works from GoodJob workers because ActionCable uses Redis pub/sub. The worker publishes to Redis; Falcon's ActionCable process subscribes and pushes to WebSocket clients.
+**Cross-process broadcasting**: `ActionCable.server.broadcast` works from GoodJob workers because ActionCable uses Valkey pub/sub (Redis-compatible). The worker publishes to Valkey; Falcon's ActionCable process subscribes and pushes to WebSocket clients.
 
 ---
 
@@ -785,7 +785,7 @@ end
 3. Create ActionCable connection (token auth), channel base, SessionChannel
 4. Configure ActionCable allowed origins
 5. Add `mount ActionCable.server => "/cable"` to routes
-6. **Verify**: In console, enqueue a `ChatStreamJob` and check Redis pub/sub output
+6. **Verify**: In console, enqueue a `ChatStreamJob` and check Valkey pub/sub output
 
 ### Phase 3: Controller + Routes
 1. Create `Api::V1::ChatController` (singleton resource)

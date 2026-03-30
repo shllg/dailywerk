@@ -771,8 +771,8 @@ MessagesController enqueues ChatStreamJob (GoodJob :llm queue)
   ▼ (GoodJob worker process — NOT Falcon)
 ChatStreamJob calls AgentRuntime.run(message) with streaming block
   │
-  ├─ Each token chunk → ActionCable.server.broadcast via Redis pub/sub
-  │     → Falcon receives from Redis → pushes to WebSocket client
+  ├─ Each token chunk → ActionCable.server.broadcast via Valkey pub/sub
+  │     → Falcon receives from Valkey → pushes to WebSocket client
   │
   ├─ On complete → broadcast { type: "complete", content: full_text, message_id: ... }
   │
@@ -782,11 +782,11 @@ ChatStreamJob calls AgentRuntime.run(message) with streaming block
 ### Key Design Points
 
 - **LLM calls run in GoodJob workers** (separate process), not in Falcon. This avoids blocking the fiber reactor and provides crash recovery.
-- **ActionCable cross-process**: `ActionCable.server.broadcast` works from GoodJob because it publishes to Redis; Falcon subscribes and pushes to WebSocket clients.
+- **ActionCable cross-process**: `ActionCable.server.broadcast` works from GoodJob because it publishes to Valkey; Falcon subscribes and pushes to WebSocket clients.
 - **SessionChannel is output-only**: Messages are sent via REST POST, not `ActionCable.receive`. The channel only subscribes to a session's broadcast stream.
 - **Token events**: `{ type: "token", delta: "...", message_id: "..." }` — one per chunk.
 - **Complete event includes full content**: Prevents stale-closure bugs in frontend — the client can use `event.content` directly instead of relying on accumulated state.
-- **Falcon config**: `isolation_level = :fiber` in production, Redis adapter for ActionCable.
+- **Falcon config**: `isolation_level = :fiber` in production, Redis adapter for ActionCable (Valkey-compatible).
 
 > **Initial implementation:** [RFC 002](../rfc-open/2026-03-29-simple-chat-conversation.md) implements the full streaming flow with `SimpleChatService` (no tools/memory). The `complete` event always includes `content` to fix the frontend stale-closure bug identified during RFC design.
 

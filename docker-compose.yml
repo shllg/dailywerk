@@ -14,13 +14,13 @@ services:
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:7-alpine
-    command: redis-server --save "" --appendonly no
+  valkey:
+    image: valkey/valkey:8-alpine
+    command: valkey-server --save "" --appendonly no
     ports:
       - "${DAILYWERK_REDIS_PORT:-6399}:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5

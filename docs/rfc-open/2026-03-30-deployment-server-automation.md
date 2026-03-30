@@ -578,6 +578,6 @@ This automation RFC replaces the older assumptions of:
 
 - host-native Ruby installation for production workloads
 - host-native Node build steps for deploys
-- native `redis-server`
+- native `valkey-server`
 - native Falcon and GoodJob systemd services
 - journald/file-only operational visibility

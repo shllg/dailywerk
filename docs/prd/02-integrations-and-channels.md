@@ -203,7 +203,7 @@ User's Obsidian App (phone/desktop)
 
 1. **S3 always latest**: VaultSyncWorker diffs local→S3 by content hash (every 5min + on inotify file change). One-way mirror. Agents write to local checkout; VaultSyncWorker pushes to S3.
 2. **pgvector always current**: EmbeddingWorker triggered by inotify. Re-chunks and re-embeds changed files. `vault_files.content_hash` skips unchanged files. See [01 §5.6](./01-platform-and-infrastructure.md#56-vault-tables) for schema.
-3. **Correct user on correct server**: MVP single-server = all active users checked out. Scale: Redis checkout lock (`user:{id}:checkout_server = server-3`), request routing to locked server.
+3. **Correct user on correct server**: MVP single-server = all active users checked out. Scale: Valkey checkout lock (`user:{id}:checkout_server = server-3`), request routing to locked server.
 4. **Disk space**: LRU eviction for inactive users (>24h no triggers). S3 retains everything. Re-checkout on next trigger. Max 10GB/user enforced at VaultSyncWorker level. Monitoring + alerts.
 5. **Cold start**: Pull full vault from S3, then start `obsidian-headless sync` on top. MVP: keep all test users warm, monitor, solve later.
 

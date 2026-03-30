@@ -17,19 +17,19 @@ AI-powered personal assistant with conversational agents, vault sync, and multi-
 **Backend:** Rails 8.1.3, Ruby 4.0.2, Falcon (fiber-based), PostgreSQL 17 + pgvector
 **Frontend:** Vite 8 + React 19 + TypeScript 5.9 + Tailwind CSS 4.2 (SPA in `frontend/`)
 **Jobs:** GoodJob (external mode only — separate worker process, never inline/async)
-**Cache/Realtime:** Redis 7 (ActionCable pub/sub, rate limiting)
+**Cache/Realtime:** Valkey 8 (ActionCable pub/sub, rate limiting)
 **Auth:** WorkOS (SSO, social login, magic links)
 **Payments:** Stripe (subscriptions + metered credits)
 **Storage:** Hetzner Object Storage (S3-compatible, SSE-C per-user encryption), RustFS in dev
 **LLM:** ruby_llm (provider-agnostic, v1.14+)
 **Package manager:** pnpm (frontend), bundler (backend)
-**Infrastructure:** Docker Compose for local services (PostgreSQL, Redis, RustFS, Mailcatcher)
+**Infrastructure:** Docker Compose for local services (PostgreSQL, Valkey, RustFS, Mailcatcher)
 
 ## Architecture Mental Model
 
 ```
 Vite SPA (React 19) ──→ Falcon ──→ Rails API ──→ PostgreSQL 17 + pgvector
-                       ↕ WebSocket (ActionCable)  → Redis 7 (pub/sub, cache)
+                       ↕ WebSocket (ActionCable)  → Valkey 8 (pub/sub, cache)
                                                   → GoodJob Workers (external)
                                                   → S3 (Hetzner / RustFS)
                                                   → LLM Providers (ruby_llm)
@@ -83,7 +83,7 @@ bundle exec bundler-audit check --update  # Dependency audit
 ## Dev Environment
 
 ```bash
-docker compose up -d          # Start PostgreSQL, Redis, RustFS, Mailcatcher
+docker compose up -d          # Start PostgreSQL, Valkey, RustFS, Mailcatcher
 bin/dev                       # Falcon + GoodJob worker + Vite dev server
 bin/rails db:create db:migrate
 cd frontend && pnpm install

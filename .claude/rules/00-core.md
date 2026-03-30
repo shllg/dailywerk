@@ -6,7 +6,7 @@
 
 ```
 Vite SPA (React 19) ──→ Falcon ──→ Rails API ──→ PostgreSQL 17 + pgvector
-                       ↕ ActionCable (WebSocket)  → Redis 7 (pub/sub, cache)
+                       ↕ ActionCable (WebSocket)  → Valkey 8 (pub/sub, cache)
                                                   → GoodJob Workers (external)
                                                   → S3 (Hetzner / RustFS)
                                                   → LLM Providers (ruby_llm)

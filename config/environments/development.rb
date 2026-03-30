@@ -23,7 +23,7 @@ Rails.application.configure do
     config.action_controller.perform_caching = false
   end
 
-  # Redis cache store
+  # Valkey cache store (Redis-compatible)
   config.cache_store = :redis_cache_store, {
     url: ENV.fetch("REDIS_URL") { "redis://localhost:6399/0" },
     expires_in: 1.hour

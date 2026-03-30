@@ -354,14 +354,14 @@ worktree_setup() {
   # Compute Vite port from API port offset
   local vite_port=$(( 5173 + (port - 3100) ))
 
-  # Allocate Redis DB for new mode
+  # Allocate Valkey DB for new mode
   local redis_db=""
   if [ "$db_mode" = "new" ]; then
     if [ -f "$env_worktree" ]; then
       redis_db="$(parse_redis_db_from_env "$env_worktree" 2>/dev/null || true)"
     fi
     if [ -z "$redis_db" ]; then
-      redis_db="$(allocate_redis_db)" || die "No available Redis DBs in range ${REDIS_DB_MIN}-${REDIS_DB_MAX}"
+      redis_db="$(allocate_redis_db)" || die "No available Valkey DBs in range ${REDIS_DB_MIN}-${REDIS_DB_MAX}"
     fi
   fi
 
@@ -481,7 +481,7 @@ ENV_ISOLATED
   echo "  DB mode:    ${db_mode}"
   if [ "$db_mode" = "new" ]; then
     echo "  DB:         ${db_name}"
-    echo "  Redis DB:   ${redis_db}"
+    echo "  Valkey DB:  ${redis_db}"
     echo "  S3 bucket:  ${rustfs_bucket}"
   fi
   echo
@@ -708,8 +708,8 @@ worktree_cleanup() {
     fi
 
     if [ -n "$redis_db" ]; then
-      say cyan "Flushing Redis DB ${redis_db}..."
-      redis-cli -p 6399 -n "$redis_db" flushdb >/dev/null 2>&1 || say yellow "  Could not flush Redis DB ${redis_db}"
+      say cyan "Flushing Valkey DB ${redis_db}..."
+      valkey-cli -p 6399 -n "$redis_db" flushdb >/dev/null 2>&1 || say yellow "  Could not flush Valkey DB ${redis_db}"
     fi
 
     if [ -n "$rustfs_bucket" ] && command -v mc >/dev/null 2>&1; then

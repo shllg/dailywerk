@@ -37,9 +37,9 @@ Core capabilities: diary, nutrition/sport tracking, research, calendar managemen
 |-------|--------|-----------|
 | **Frontend** | Vite + React + TypeScript + Tailwind CSS + DaisyUI | SPA dashboard with in-app chat. DaisyUI for fast, accessible UI. |
 | **Backend API** | Ruby on Rails (latest, API mode) + Falcon server | Fiber-per-request concurrency, native HTTP/2, WebSocket. Streaming LLM responses. |
-| **Background Jobs** | ActiveJob + GoodJob | Postgres-backed. No Redis dependency for jobs. Built-in cron, concurrency, batches, dashboard. See [04 §8](./04-billing-and-operations.md#8-goodjob-configuration). |
+| **Background Jobs** | ActiveJob + GoodJob | Postgres-backed. No Valkey dependency for jobs. Built-in cron, concurrency, batches, dashboard. See [04 §8](./04-billing-and-operations.md#8-goodjob-configuration). |
 | **DB** | PostgreSQL (latest) + pgvector | Primary store. RLS for user isolation. pgvector for semantic search. UUIDv7 PKs. |
-| **Cache / Realtime** | Redis | Session cache, rate limiting, pub/sub, ActionCable (WebSocket for in-app chat). |
+| **Cache / Realtime** | Valkey | Session cache, rate limiting, pub/sub, ActionCable (WebSocket for in-app chat). Redis-compatible protocol. |
 | **Search** | Hybrid: pgvector (semantic) + PostgreSQL FTS (keyword) | Postgres-native. See [02 §7](./02-integrations-and-channels.md#7-data-search--retrieval-layer). |
 | **File Storage** | Hetzner Object Storage (S3-compatible) | EU residency. Per-user SSE-C encryption. |
 | **Vault Sync** | Obsidian Headless (official CLI, Feb 2026) | Official headless client. Server-side bidirectional sync. Node.js 22+. |
@@ -53,7 +53,7 @@ Fiber-based. Each request yields on I/O, enabling massive concurrency for stream
 
 ### Why GoodJob over Sidekiq
 
-Postgres-backed. Eliminates Redis as critical-path for jobs. Cron, concurrency controls, batches, web dashboard. GoodJob runs in **external mode** for production (separate worker process) — `async_server` mode uses threads internally and is untested with Falcon's fiber model. Redis stays for cache/pub/sub only.
+Postgres-backed. Eliminates Valkey as critical-path for jobs. Cron, concurrency controls, batches, web dashboard. GoodJob runs in **external mode** for production (separate worker process) — `async_server` mode uses threads internally and is untested with Falcon's fiber model. Valkey stays for cache/pub/sub only.
 
 ### Why UUIDv7
 
@@ -126,7 +126,7 @@ This indirection is deliberate. It keeps the MVP simple (one default workspace a
 | **PostgreSQL** | Shared schema, `workspace_id` on scoped tables, RLS policies, connection-level `SET app.current_workspace_id` | no rows visible when the variable is unset |
 | **S3 (Hetzner)** | Per-workspace prefix `workspaces/{workspace_id}/...`, per-workspace AES-256 SSE-C key | workspace boundary enforced at storage path level |
 | **pgvector** | Embeddings carry `workspace_id` + RLS | searches stay workspace-scoped |
-| **Redis** | Key namespacing `workspace:{workspace_id}:*` | shared cache space without cross-workspace collisions |
+| **Valkey** | Key namespacing `workspace:{workspace_id}:*` | shared cache space without cross-workspace collisions |
 | **Disk (vault checkout)** | `/data/workspaces/{workspace_id}/vaults/...` | workspace-local working set |
 
 ### 4.2 PostgreSQL Row-Level Security
@@ -672,7 +672,7 @@ end
 │                                                         │
 │  Nginx (+TLS) → Rails API (Falcon)                      │
 │  GoodJob Workers (separate process, external mode)      │
-│  PostgreSQL (+pgvector) + Redis                         │
+│  PostgreSQL (+pgvector) + Valkey                        │
 │  Node.js 22 (Obsidian Headless)                         │
 │  Vault checkouts: /data/vaults/{user_id}/               │
 │  Built-in bridges (Telegram, WhatsApp)                  │
@@ -719,9 +719,9 @@ Docker Compose for MVP. Single server for first 10 test users (keep all vaults w
 3. **Shared resources** — Agent sharing, vault sharing. Deferred to post-MVP. Schema supports it via `agent_shares` pattern (§4.4).
 4. **Frontend architecture** — Vite + React + TypeScript + Tailwind + DaisyUI chosen. [RFC 002](../rfc-open/2026-03-29-simple-chat-conversation.md) defines the initial chat UI, app shell with top bar, and API contract. Component patterns to be codified after more features ship.
 5. **Observability** — Logging, metrics, alerting, health checks, session replay for debugging. Needs dedicated design.
-6. **GDPR / data deletion** — Define `UserDeletionService` for hard-delete of all user data across PG, S3, Redis, and vault checkouts.
+6. **GDPR / data deletion** — Define `UserDeletionService` for hard-delete of all user data across PG, S3, Valkey, and vault checkouts.
 7. **SPA authentication** — React SPA and Rails API must share a root domain for HttpOnly/Secure/SameSite cookie-based auth. JWT in localStorage is an XSS vector.
 8. **Connection pooling** — Falcon at scale needs PgBouncer. Transaction-mode PgBouncer conflicts with session-level SET. Evaluate statement-level pooling or connection pinning strategies.
 9. **Observability** — Logging, metrics, alerting, health checks, session replay for debugging. Needs dedicated design.
-10. **GDPR / data deletion** — `UserDeletionService` for hard-delete of all user data across PG, S3, Redis, and vault checkouts.
-11. **Rate limiting** — Per-user request rate (requests/minute) in Redis. Per-provider rate limiting to respect API quotas.
+10. **GDPR / data deletion** — `UserDeletionService` for hard-delete of all user data across PG, S3, Valkey, and vault checkouts.
+11. **Rate limiting** — Per-user request rate (requests/minute) in Valkey. Per-provider rate limiting to respect API quotas.

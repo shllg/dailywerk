@@ -34,7 +34,7 @@ paths:
 ## Safe Libraries
 
 - `async-http-faraday` — HTTP client
-- `async-redis` — Redis client
+- `async-redis` — Valkey/Redis client
 - `Concurrent::Map` — Fiber-safe hash
 - `GoodJob` — Already fiber-safe job backend
 
