@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { AuthProvider } from './contexts/AuthContext'
+import { useAuth } from './hooks/useAuth'
 import { LoginPage } from './pages/LoginPage'
 import { apiRequest } from './services/api'
 

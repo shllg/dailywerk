@@ -1,28 +1,11 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from 'react'
-import type { AuthUser, AuthWorkspace, SessionResponse } from '../types/auth'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import type { SessionResponse } from '../types/auth'
+import type { AuthUser, AuthWorkspace } from '../types/auth'
+import { AuthContext } from './AuthContextValue'
 
 const AUTH_TOKEN_KEY = 'auth_token'
 const AUTH_USER_KEY = 'auth_user'
 const AUTH_WORKSPACE_KEY = 'auth_workspace'
-
-interface AuthContextValue {
-  user: AuthUser | null
-  workspace: AuthWorkspace | null
-  token: string | null
-  isAuthenticated: boolean
-  login: (email: string) => Promise<void>
-  logout: () => void
-}
-
-const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
 function readStoredJson<T>(key: string): T | null {
   const value = localStorage.getItem(key)
@@ -118,7 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setWorkspace(session.workspace)
   }, [])
 
-  const value = useMemo<AuthContextValue>(
+  const value = useMemo(
     () => ({
       user,
       workspace,
@@ -131,14 +114,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext)
-
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider')
-  }
-
-  return context
 }
