@@ -13,7 +13,7 @@ implemented_by:
   - rfc/2026-03-29-simple-chat-conversation
   - rfc/2026-03-30-workspace-isolation
 ---
-
+1
 # DailyWerk — Platform & Infrastructure
 
 > Canonical reference for stack decisions, tenant isolation, database schema, and deployment.

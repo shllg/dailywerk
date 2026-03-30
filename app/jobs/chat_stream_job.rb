@@ -59,7 +59,7 @@ class ChatStreamJob < ApplicationJob
   # @param session [Session]
   # @return [Message, nil]
   def latest_assistant_message_for(session)
-    session.messages.where(role: "assistant").order(created_at: :desc).first
+    session.messages.where(role: "assistant").reorder(created_at: :desc).first
   end
 
   # Updates session counters after the response is stored.

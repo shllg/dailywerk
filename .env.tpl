@@ -24,6 +24,9 @@ SMTP_PORT=1035
 # CORS
 CORS_ORIGINS=http://localhost:5173
 
+# OpenAI
+OPENAI_API_KEY=op://DailyWerk/dailywerk-dev-env/openai-api-key
+
 # GoodJob
 # GOOD_JOB_QUEUE_PREFIX=                  # Queue name prefix for worktree isolation
 # GOOD_JOB_ENABLE_CRON=true               # Disable in worktrees
