@@ -280,7 +280,96 @@ The production `DATABASE_URL` should use the non-superuser application role so R
 
 ---
 
-## 8. Implementation Checklist
+## 8. Secrets Management — 1Password Integration
+
+### 8.1 Architecture
+
+Secrets are stored in 1Password vaults and retrieved at deploy time using a 1Password service account. The only secret manually placed on the server is the `OP_SERVICE_ACCOUNT_TOKEN`.
+
+### 8.2 Env File Generation
+
+The deploy-listener (or a pre-start script) must:
+
+1. authenticate to 1Password using the service account token
+2. read the appropriate vault items for the target environment
+3. render the `.env` file for the app slot being deployed
+4. pass the env file to Docker Compose
+
+This replaces static `.env` files on the server. The `.env.example` in the repo documents the expected shape, but production values never live on disk outside of container runtime.
+
+### 8.3 1Password CLI
+
+The server needs the `op` CLI installed. The deploy scripts should use `op read` or `op inject` to resolve secret references.
+
+Example:
+
+```bash
+op read "op://DailyWerk Production/rails/master-key"
+```
+
+### 8.4 Required Vault Structure
+
+| Vault | Item | Fields |
+|-------|------|--------|
+| `DailyWerk Production` | `rails` | `master-key`, `secret-key-base` |
+| `DailyWerk Production` | `database` | `url` |
+| `DailyWerk Production` | `valkey` | `url` |
+| `DailyWerk Production` | `workos` | `api-key`, `client-id` |
+| `DailyWerk Production` | `stripe` | `secret-key`, `webhook-secret`, `publishable-key` |
+| `DailyWerk Production` | `storage` | `access-key-id`, `secret-access-key`, `endpoint`, `region`, `bucket` |
+| `DailyWerk Production` | `metrics` | `basic-auth-username`, `basic-auth-password` |
+| `DailyWerk Production` | `grafana` | `admin-username`, `admin-password` |
+| `DailyWerk Production` | `backup` | `restic-password` |
+| `DailyWerk Staging` | *(same structure, staging values)* | |
+| `DailyWerk Shared` | `deploy` | `webhook-secret`, `ghcr-token`, `ghcr-user` |
+| `DailyWerk Shared` | `tailscale` | `auth-key` |
+
+---
+
+## 9. Deploy Event Tracking
+
+### 9.1 Grafana Annotations
+
+The deploy-listener must push an annotation to Grafana after each successful slot switch. This makes deploys visible as vertical markers on all dashboards.
+
+Required annotation fields:
+
+- `time`: deploy timestamp
+- `tags`: `["deploy", "<environment>", "<slot>"]`
+- `text`: commit SHA, image tag, environment, result
+
+### 9.2 Implementation
+
+The deploy-listener calls the Grafana HTTP API:
+
+```bash
+curl -X POST http://grafana:3000/api/annotations \
+  -H "Authorization: Bearer $GRAFANA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "time": <epoch_ms>,
+    "tags": ["deploy", "production", "blue"],
+    "text": "Deploy prod-abc123f to blue slot — success"
+  }'
+```
+
+The Grafana API key should be stored in 1Password and injected into the deploy-listener container.
+
+### 9.3 Dashboard Integration
+
+All Grafana dashboards should include an annotation query filtering on the `deploy` tag so operators can correlate metric changes with specific rollouts.
+
+---
+
+## 10. Operational Documentation
+
+The codebase changes must include the creation of `docs/infrastructure/` with runbooks as specified in the PRD §9. These are versioned alongside the application so they stay in sync with deploy scripts, compose files, and secret structures.
+
+The implementation checklist below includes a line item for each required runbook.
+
+---
+
+## 11. Implementation Checklist
 
 1. [ ] add `.env.example` for the container runtime contract
 2. [ ] switch production cache/cable settings to `VALKEY_URL`
@@ -293,10 +382,19 @@ The production `DATABASE_URL` should use the non-superuser application role so R
 9. [ ] add GHCR build/publish workflows
 10. [ ] add deploy-notification workflow
 11. [ ] verify GoodJob remains external-only
+12. [ ] add 1Password CLI integration to deploy scripts (`op read` / `op inject`)
+13. [ ] add Grafana annotation push to deploy-listener after slot switch
+14. [ ] create `docs/infrastructure/deploy.md` runbook
+15. [ ] create `docs/infrastructure/rollback.md` runbook
+16. [ ] create `docs/infrastructure/backup-restore.md` runbook
+17. [ ] create `docs/infrastructure/tailscale.md` runbook
+18. [ ] create `docs/infrastructure/secrets.md` runbook
+19. [ ] create `docs/infrastructure/incident-response.md` runbook
+20. [ ] create `docs/infrastructure/new-server.md` runbook
 
 ---
 
-## 9. What This RFC No Longer Assumes
+## 12. What This RFC No Longer Assumes
 
 - no host-level `bundle install` during deploy
 - no host-level `pnpm build` during deploy

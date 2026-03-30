@@ -33,9 +33,12 @@ Before running these steps:
 - the Hetzner server exists
 - the `deploy` user exists with sudo access
 - Cloudflare origin certs are available on the server
-- GHCR read credentials exist
-- backup encryption material exists
-- required app secrets are available
+- a Tailscale auth key is available (from 1Password or provided directly)
+- the `OP_SERVICE_ACCOUNT_TOKEN` for 1Password is available
+- GHCR read credentials exist (in 1Password)
+- backup encryption material exists (in 1Password)
+
+All app secrets are stored in 1Password and retrieved at runtime — they do not need to be pre-staged as files.
 
 Claude Code should stop if those prerequisites are missing.
 
@@ -57,10 +60,12 @@ Run as `deploy` with sudo.
 
 Configure `ufw` to allow:
 
-- HTTPS from Cloudflare IP ranges
-- SSH from known admin IPs only
+- 443/tcp from Cloudflare IP ranges (for app/staging traffic)
+- all traffic on the Tailscale interface (`tailscale0`)
 
-Everything else should remain denied.
+SSH is **not** exposed on the public interface. Admin access (SSH, Grafana) is reachable only via Tailscale.
+
+Everything else should remain denied on the public interface.
 
 ### 2.3 Baseline Security Packages
 
@@ -120,6 +125,74 @@ echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 ```
 
 Store the credential where automation can re-use it safely.
+
+---
+
+## 3A. Phase 2A — Tailscale Installation
+
+### 3A.1 Install Tailscale
+
+Install Tailscale from the official Debian repository:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+```
+
+### 3A.2 Authenticate
+
+Use the auth key from 1Password:
+
+```bash
+tailscale up --authkey="$TAILSCALE_AUTH_KEY" --hostname=dailywerk-ops
+```
+
+### 3A.3 Verify
+
+```bash
+tailscale status
+tailscale ip -4
+```
+
+The server should appear in the tailnet with hostname `dailywerk-ops`.
+
+### 3A.4 Firewall Integration
+
+After Tailscale is running, the `tailscale0` interface is available. The ufw rules from Phase 1 should allow all traffic on this interface:
+
+```bash
+ufw allow in on tailscale0
+```
+
+This makes SSH and Grafana (port 3000) reachable to tailnet members without opening them to the public internet.
+
+---
+
+## 3B. Phase 2B — 1Password CLI
+
+### 3B.1 Install the `op` CLI
+
+Install the 1Password CLI from the official repository:
+
+```bash
+# Add 1Password apt repo and install op
+```
+
+### 3B.2 Configure the Service Account
+
+The `OP_SERVICE_ACCOUNT_TOKEN` must be placed in a secure location readable by the deploy user:
+
+```bash
+# Store in /srv/dailywerk/config/env/op-token.env
+# Permissions: 600, owned by deploy:deploy
+```
+
+### 3B.3 Verify
+
+```bash
+op read "op://DailyWerk Shared/deploy/webhook-secret"
+```
+
+This must succeed before proceeding. All subsequent phases that need secrets should use `op read` or `op inject`.
 
 ---
 
@@ -214,8 +287,9 @@ Responsibilities:
 
 - terminate Cloudflare origin TLS
 - proxy to the active blue/green slot
-- expose `ops.dailywerk.com` to Grafana
 - receive signed deploy notifications
+
+Grafana is **not** proxied through Nginx. It binds to the Tailscale interface only (see Phase 2A).
 
 ### 5.4 App Slot Compose Definitions
 
@@ -244,7 +318,8 @@ Nginx proxies:
 
 - `app.dailywerk.com` to the active production slot
 - `staging.dailywerk.com` to the active staging slot
-- `ops.dailywerk.com` to Grafana
+
+Grafana is not served by Nginx — it is accessed directly via Tailscale on port 3000.
 
 It must route:
 
@@ -287,13 +362,15 @@ For the targeted environment:
 
 1. read the current active slot
 2. choose the inactive slot
-3. pull the new images into the inactive slot
-4. run database migrations once using the new API image
-5. start the inactive slot
-6. wait for `/ready` on the new slot
-7. reload Nginx to point to the new slot
-8. verify public health
-9. stop the previous slot after a grace period
+3. resolve secrets from 1Password for the target environment
+4. pull the new images into the inactive slot
+5. run database migrations once using the new API image
+6. start the inactive slot
+7. wait for `/ready` on the new slot
+8. reload Nginx to point to the new slot
+9. verify public health
+10. push a deploy annotation to Grafana (timestamp, environment, slot, commit SHA, result)
+11. stop the previous slot after a grace period
 
 ### 7.3 Rollback Procedure
 
@@ -350,8 +427,11 @@ Grafana must be provisioned automatically with:
 
 - Prometheus datasource
 - Loki datasource
-- admin user from secret/env
+- admin user from 1Password (`op read "op://DailyWerk Production/grafana/admin-password"`)
 - starter dashboards for host, Docker, DB, app, and worker
+- deploy annotation query on all dashboards (filtering on `deploy` tag)
+
+Grafana must bind **only to the Tailscale interface** (e.g., `GF_SERVER_HTTP_ADDR=<tailscale-ip>`) so it is not reachable from the public internet. Operators access it at `http://dailywerk-ops:3000` via Tailscale MagicDNS.
 
 ### 9.3 Loki / Promtail
 
@@ -472,18 +552,23 @@ docker ps
 docker compose ls
 curl -sf https://app.dailywerk.com/up
 curl -sf https://staging.dailywerk.com/up
-curl -sf https://ops.dailywerk.com/login
+curl -sf http://dailywerk-ops:3000/login    # via Tailscale
+tailscale status
+op read "op://DailyWerk Shared/deploy/webhook-secret"  # 1Password connectivity
 ```
 
 And confirm all of the following:
 
 1. production and staging are healthy
-2. Grafana dashboards load
+2. Grafana dashboards load via Tailscale (`http://dailywerk-ops:3000`)
 3. Loki logs are queryable in Grafana Explore
 4. Prometheus targets are healthy
 5. a blue/green deploy flips without outage
-6. a rollback flips back without outage
-7. backups complete and restore verification passes
+6. deploy annotation appears in Grafana after the flip
+7. a rollback flips back without outage
+8. backups complete and restore verification passes
+9. SSH is reachable only via Tailscale, not the public IP
+10. 1Password `op read` resolves secrets correctly
 
 ---
 

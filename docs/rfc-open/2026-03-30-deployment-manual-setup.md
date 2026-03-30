@@ -62,9 +62,8 @@ Create proxied DNS records:
 |------|------|--------|
 | A | `app` | server IP |
 | A | `staging` | server IP |
-| A | `ops` | server IP |
 
-`ops.dailywerk.com` is the admin-facing Grafana endpoint.
+Grafana is not publicly exposed. It is reachable only via Tailscale (see §3A below).
 
 ### 2.2 SSL/TLS
 
@@ -90,10 +89,37 @@ Enable:
 - HTTP/2
 - minimum TLS 1.2 or higher
 
-Restrict access to `ops.dailywerk.com` with either:
+No Cloudflare configuration is needed for admin/ops access — that goes through Tailscale.
 
-- Cloudflare Access, or
-- Cloudflare WAF/IP rules plus Grafana auth
+---
+
+## 3A. Tailscale Setup
+
+### 3A.1 Create the Tailnet
+
+If not already done, create or use an existing Tailscale account. The server and all admin machines must join the same tailnet.
+
+### 3A.2 Generate a Server Auth Key
+
+1. Go to the Tailscale admin console
+2. Create an auth key (reusable if needed for re-provisioning, single-use otherwise)
+3. Store the auth key in 1Password (`DailyWerk Shared > tailscale > auth-key`)
+
+### 3A.3 MagicDNS
+
+Enable MagicDNS in the Tailscale admin console. Set the server's Tailscale hostname to `dailywerk-ops` so Grafana is reachable at `http://dailywerk-ops:3000`.
+
+### 3A.4 ACLs (Optional)
+
+If the tailnet is shared with other projects, restrict the DailyWerk server's Tailscale ACLs so only authorized users can reach SSH and Grafana ports.
+
+### 3A.5 Admin Machines
+
+Each operator must:
+
+1. Install Tailscale on their machine
+2. Join the same tailnet
+3. Verify they can reach the server's Tailscale IP
 
 ---
 
@@ -134,15 +160,11 @@ Verify or configure:
 
 ## 4. Grafana / Ops Access
 
-### 4.1 Decide the Admin Access Model
+### 4.1 Access Model
 
-Choose one:
+Grafana is accessible only via Tailscale at `http://dailywerk-ops:3000`. No public internet exposure.
 
-- Grafana login + Cloudflare Access
-- Grafana login + IP allowlist
-- Grafana login + both
-
-Recommendation: **Grafana login + Cloudflare Access** for the cleanest browser-based admin experience.
+Grafana admin auth is still required as a secondary layer — Tailscale membership grants network access, not application access.
 
 ### 4.2 Prepare Grafana Credentials
 
@@ -184,28 +206,47 @@ Record:
 
 ---
 
-## 6. Rails Secrets and Application Credentials
+## 6. Secrets — 1Password Setup
 
-### 6.1 Production Credentials
+### 6.1 Create Vaults
 
-Prepare production and staging secrets for:
+Create three vaults in 1Password:
 
-- Rails master key
-- WorkOS
-- Stripe
-- object storage
-- database role password
-- GHCR pull token if the deploy listener expects it in env
-- backup encryption/restic password material
+| Vault | Purpose |
+|-------|---------|
+| `DailyWerk Production` | All production secrets |
+| `DailyWerk Staging` | All staging secrets |
+| `DailyWerk Shared` | Secrets shared across environments (deploy webhook, GHCR, Tailscale, Cloudflare certs) |
 
-### 6.2 Backup Encryption Material
+### 6.2 Populate Vault Items
 
-The backup design assumes encrypted off-host backups. Prepare and store one of:
+For each environment vault, create items with fields as specified in the Codebase Changes RFC §8.4 (vault structure table).
 
-- a restic repository password, or
-- an `age` public/private keypair if the implementation chooses envelope encryption for exported artifacts
+At minimum, each environment needs:
 
-Do not keep the only copy of the backup secret on the server.
+- Rails master key and secret key base
+- DATABASE_URL
+- VALKEY_URL
+- WorkOS API key and client ID
+- Stripe secret key, webhook secret, publishable key
+- S3/object storage credentials
+- Metrics basic auth credentials
+- Grafana admin credentials
+- Restic backup password
+
+### 6.3 Create a Service Account
+
+1. In 1Password, create a service account named `dailywerk-server`
+2. Grant it read access to all three vaults
+3. Record the `OP_SERVICE_ACCOUNT_TOKEN`
+
+This token is the **only secret that must be manually placed on the server**. All other secrets are retrieved via `op read` at deploy time.
+
+### 6.4 Backup Encryption Material
+
+The restic repository password must be stored in 1Password (`DailyWerk Production > backup > restic-password`) and also kept in a separate offline backup (e.g., printed or in a separate 1Password vault accessible to the account owner).
+
+Do not keep the only copy of any secret on the server.
 
 ---
 
@@ -263,7 +304,7 @@ After the automation RFC has been applied, manually verify:
 5. [ ] `https://app.dailywerk.com/up` returns success
 6. [ ] `https://staging.dailywerk.com/up` returns success
 7. [ ] zero-downtime rehearsal works by deploying a harmless image change
-8. [ ] `https://ops.dailywerk.com` opens Grafana
+8. [ ] `http://dailywerk-ops:3000` opens Grafana via Tailscale
 9. [ ] Grafana shows Prometheus metrics
 10. [ ] Grafana Explore can query Loki logs from app, worker, and Nginx
 11. [ ] backups run and an encrypted restore rehearsal succeeds

@@ -129,6 +129,10 @@ Shared state (separate infra compose)
   -> PostgreSQL 17 + pgvector
   -> Valkey
 
+Tailscale (admin access only)
+  -> SSH
+  -> Grafana (port 3000)
+
 Observability (separate observability compose)
   -> Prometheus
   -> Grafana
@@ -184,9 +188,8 @@ User
 |------|------|--------|-------|
 | A | `app` | Hetzner server IP | proxied |
 | A | `staging` | Hetzner server IP | proxied |
-| A | `ops` | Hetzner server IP | proxied, admin-only |
 
-`ops.dailywerk.com` is used for Grafana so logs and dashboards are available in a browser behind admin auth.
+Grafana is **not** exposed via Cloudflare. It is reachable only on the Tailscale network at `http://<tailscale-hostname>:3000` (or a Tailscale MagicDNS name such as `dailywerk-ops`). This eliminates the need for a public `ops` subdomain and keeps the entire observability surface off the internet.
 
 ---
 
@@ -263,14 +266,16 @@ Rollback must be immediate:
 - SSH on a non-default port
 - `ufw` allows:
   - 443/tcp from Cloudflare IP ranges
-  - SSH from admin IPs only
-- `fail2ban` protects SSH
+  - Tailscale interface traffic (admin SSH, Grafana)
+- SSH is reachable only via Tailscale — no public SSH port
+- `fail2ban` protects SSH as a secondary layer
 
 ### Docker
 
 - containers run as non-root where practical
 - root filesystem read-only where practical
-- only Nginx and Grafana are exposed externally
+- only Nginx is exposed to the public internet (via Cloudflare)
+- Grafana is exposed only on the Tailscale interface — not publicly reachable
 - PostgreSQL and Valkey are available only on the internal Docker network
 - GHCR credentials are read-only and stored outside the repo
 
@@ -326,9 +331,29 @@ Backups must be:
 
 ---
 
-## 9. Logging, Monitoring, and Metrics
+## 9. Operational Documentation
 
-### 9.1 Mandatory Stack
+All operational procedures must be documented in `docs/infrastructure/` as runbooks. This is part of the deployment deliverable, not a follow-up.
+
+Required runbooks:
+
+| Runbook | Content |
+|---------|---------|
+| `docs/infrastructure/deploy.md` | How to trigger, monitor, and verify a deploy |
+| `docs/infrastructure/rollback.md` | How to roll back a bad deploy |
+| `docs/infrastructure/backup-restore.md` | How to run backups manually, verify them, and restore |
+| `docs/infrastructure/tailscale.md` | How to join the Tailscale network, access Grafana and SSH |
+| `docs/infrastructure/secrets.md` | How to rotate secrets in 1Password and sync them to the server |
+| `docs/infrastructure/incident-response.md` | How to triage common failures using Grafana and SSH |
+| `docs/infrastructure/new-server.md` | How to provision a replacement server from scratch |
+
+Each runbook should be written for an operator who has never touched the server before. Commands should be copy-pasteable. Decision points should be explicit.
+
+---
+
+## 10. Logging, Monitoring, and Metrics
+
+### 10.1 Mandatory Stack
 
 | Need | Tool |
 |------|------|
@@ -341,7 +366,7 @@ Backups must be:
 | PostgreSQL metrics | postgres_exporter |
 | Valkey metrics | valkey_exporter |
 
-### 9.2 Log Viewer Requirement
+### 10.2 Log Viewer Requirement
 
 The OSS web log viewer requirement is satisfied by:
 
@@ -351,10 +376,11 @@ The OSS web log viewer requirement is satisfied by:
 
 This keeps metrics and logs in the same admin interface instead of splitting the operational surface across multiple tools.
 
-### 9.3 Access Model
+### 10.3 Access Model
 
-- Grafana is published at `https://ops.dailywerk.com`
-- access is restricted with admin auth and optionally Cloudflare Access or IP allowlisting
+- Grafana is reachable **only via Tailscale** at `http://<tailscale-hostname>:3000`
+- no public DNS, no Cloudflare proxy, no internet exposure
+- Grafana admin auth is still required as a secondary layer
 - Grafana has separate dashboards for:
   - production app
   - staging app
@@ -363,7 +389,7 @@ This keeps metrics and logs in the same admin interface instead of splitting the
   - Nginx
   - Docker host
 
-### 9.4 Alerting
+### 10.4 Alerting
 
 Grafana alerting should send notifications to at least one of:
 
@@ -381,11 +407,25 @@ At minimum, alerts are required for:
 - backup failure
 - Loki or Prometheus down
 
+### 10.5 Deploy Event Tracking
+
+Every deploy must be visible in Grafana as an annotation on dashboards. This allows operators to correlate behavior changes with specific rollouts.
+
+Required data per deploy event:
+
+- timestamp
+- environment (production / staging)
+- image tag / commit SHA
+- slot activated (blue / green)
+- result (success / rollback)
+
+The deploy-listener should push annotations to Grafana's annotation API after each slot switch. Grafana dashboards should display these as vertical markers so any metric change can be traced to a specific deploy.
+
 ---
 
-## 10. Resource Model
+## 11. Resource Model
 
-### Recommended Budget on CPX41
+### 11.1 Recommended Budget on CPX41
 
 | Service Group | Approx Memory Budget |
 |---------------|----------------------|
@@ -400,7 +440,33 @@ This still leaves operating margin for Docker cache, filesystem cache, and burst
 
 ---
 
-## 11. Claude Code on the Server
+## 12. Secrets Management
+
+### 12.1 1Password as the Source of Truth
+
+All production and staging secrets are stored in **1Password** using a dedicated vault per environment. The server retrieves secrets via 1Password service accounts — secrets are never committed to the repository or manually pasted into files.
+
+| Vault | Contents |
+|-------|----------|
+| `DailyWerk Production` | Rails master key, DATABASE_URL, WorkOS keys, Stripe keys, S3 credentials, GHCR token, restic password, Grafana admin password |
+| `DailyWerk Staging` | Same structure, staging-specific values |
+| `DailyWerk Shared` | Deploy webhook secret, Tailscale auth key, Cloudflare origin certs |
+
+### 12.2 Service Account Model
+
+- One 1Password service account per server (not per environment) for simplicity at this scale
+- The service account token is the only secret that must be manually placed on the server
+- All other secrets are pulled from 1Password at deploy time or container startup
+
+### 12.3 Secret Rotation
+
+- Rotating a secret means updating the 1Password item, then re-deploying or restarting the affected containers
+- The deploy-listener and env-file generation should pull from 1Password, not from static files
+- Runbook in `docs/infrastructure/secrets.md` must document the rotation procedure for each secret type
+
+---
+
+## 13. Claude Code on the Server
 
 Claude Code is an operator tool, not a runtime dependency.
 
@@ -419,7 +485,7 @@ Rules:
 
 ---
 
-## 12. Final Decision Summary
+## 14. Final Decision Summary
 
 This PRD now assumes:
 
@@ -430,5 +496,9 @@ This PRD now assumes:
 5. **blue/green zero-downtime deploys**
 6. **compressed and encrypted backups**
 7. **Grafana + Prometheus + Loki as required local observability**
+8. **Tailscale for all admin access** — SSH and Grafana are reachable only via Tailscale, not the public internet
+9. **1Password for secrets management** — one vault per environment, service account on the server, no static secret files
+10. **Deploy events tracked as Grafana annotations** — every deploy is visible on dashboards
+11. **Operational runbooks in `docs/infrastructure/`** — copy-pasteable procedures for all common operations
 
 That is the baseline the RFCs must implement.
