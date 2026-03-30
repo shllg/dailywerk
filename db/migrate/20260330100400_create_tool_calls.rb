@@ -1,5 +1,9 @@
+require_relative "../../lib/rls_migration_helpers"
+
 class CreateToolCalls < ActiveRecord::Migration[8.1]
-  def change
+  include RlsMigrationHelpers
+
+  def up
     create_table :tool_calls, id: :uuid, default: -> { "gen_random_uuid_v7()" } do |t|
       t.references :message, type: :uuid, null: false, foreign_key: true
       t.string :tool_call_id, null: false
@@ -11,5 +15,14 @@ class CreateToolCalls < ActiveRecord::Migration[8.1]
       t.index :tool_call_id, unique: true
       t.index :name
     end
+
+    safety_assured do
+      enable_parent_rls!(:tool_calls, parent_table: :messages, parent_fk: :message_id)
+    end
+  end
+
+  def down
+    safety_assured { disable_parent_rls!(:tool_calls) }
+    drop_table :tool_calls
   end
 end
