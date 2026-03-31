@@ -15,6 +15,8 @@ implemented_by:
   - rfc/2026-03-31-agent-configuration
   - rfc/2026-03-31-agent-session-management
   - rfc/2026-03-31-debug-tools
+  - rfc/2026-03-31-vault-filesystem
+  - rfc/2026-03-31-vault-backup-versioning
 ---
 1
 # DailyWerk — Platform & Infrastructure

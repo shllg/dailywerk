@@ -65,6 +65,7 @@ bundle exec bundler-audit check --update  # Dependency audit
 - `docs/prd/03-agentic-system.md` — Agent runtime, memory, tools, streaming
 - `docs/prd/04-billing-and-operations.md` — Credits, BYOK, GoodJob config, MCP
 - `docs/prd/05-ai-developer-tooling.md` — Expectations for Claude Code and Codex
+- `docs/prd/07-future-work.md` — Living inventory of deferred features and technical debt
 - `docs/rfc-open/2026-03-29-ai-tooling-phase2.md` — Deferred agent/skill/hook config
 - `docs/rfc-done/2026-03-29-simple-chat-conversation.md` — First chat conversation (done)
 - `docs/rfc-done/2026-03-30-workspace-isolation.md` — Workspace isolation (done)

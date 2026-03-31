@@ -43,6 +43,7 @@ The PRD defines the full session lifecycle ([03 §3](../prd/03-agentic-system.md
 - Handoffs (HandoffTool, multi-agent routing) (see [PRD 03 §4](../prd/03-agentic-system.md#4-multi-agent-routing--handoffs))
 - Memory extraction (MemoryExtractionJob) — hooks exist but are no-ops until memory ships
 - OpenAI Responses API server-side compaction — future optimization
+- Voice message processing — see [RFC Voice Message Processing](2026-03-31-voice-message-processing.md) (builds on D7 MessageSummarizer and D8 media_description)
 
 ---
 

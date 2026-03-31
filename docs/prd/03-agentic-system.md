@@ -14,6 +14,7 @@ implemented_by:
   - rfc/2026-03-31-agent-configuration
   - rfc/2026-03-31-agent-session-management
   - rfc/2026-03-31-debug-tools
+  - rfc/2026-03-31-voice-message-processing
 ---
 
 # DailyWerk — Agentic System

@@ -13,8 +13,11 @@ implemented_by:
   - rfc/2026-03-30-messaging-gateway-and-bridge-protocol
   - rfc/2026-03-30-signal-bridge-npm-package
   - rfc/2026-03-31-google-integration
+  - rfc/2026-03-31-voice-message-processing
   - rfc/2026-03-31-inbound-email-processing
   - rfc/2026-03-31-imap-smtp-integration
+  - rfc/2026-03-31-vault-filesystem
+  - rfc/2026-03-31-obsidian-sync
 ---
 
 # DailyWerk — Integrations & Channels
