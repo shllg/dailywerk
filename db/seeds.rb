@@ -22,15 +22,11 @@ Workspace.find_each do |workspace|
   Current.user = workspace.owner
   Current.workspace = workspace
 
-  workspace.agents.find_or_create_by!(slug: "main") do |agent|
-    agent.name = "DailyWerk"
-    agent.model_id = "gpt-5.4"
-    agent.instructions = <<~PROMPT
-      You are DailyWerk, a helpful personal AI assistant.
-      Be concise, friendly, and direct. Use markdown for formatting when helpful.
-      If you do not know something, say so.
-    PROMPT
-    agent.temperature = 0.7
+  workspace.agents.find_or_create_by!(slug: AgentDefaults::VALUES[:slug]) do |agent|
+    AgentDefaults::VALUES.except(:slug).each do |field, value|
+      agent.public_send(:"#{field}=", value.deep_dup)
+    end
+
     agent.is_default = true
   end
 end

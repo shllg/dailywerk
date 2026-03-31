@@ -23,6 +23,24 @@ class SessionTest < ActiveSupport::TestCase
     end
   end
 
+  test "resolve stores the model record with the agent provider" do
+    user, workspace = create_user_with_workspace
+
+    with_current_workspace(workspace, user:) do
+      agent = Agent.create!(
+        slug: "main",
+        name: "Claude",
+        model_id: "claude-3-7-sonnet",
+        provider: "anthropic"
+      )
+
+      session = Session.resolve(agent:)
+
+      assert_equal "anthropic", session.model.provider
+      assert_equal "claude-3-7-sonnet", session.model.model_id
+    end
+  end
+
   test "rejects agents from another workspace" do
     user, workspace = create_user_with_workspace
     other_user, other_workspace = create_user_with_workspace(

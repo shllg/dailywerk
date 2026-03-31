@@ -2,7 +2,7 @@
 
 # Runs a plain streaming conversation against the default OpenAI Responses model.
 class SimpleChatService
-  PROVIDER = :openai_responses
+  DEFAULT_PROVIDER = :openai_responses
 
   # @param session [Session]
   def initialize(session:)
@@ -17,7 +17,7 @@ class SimpleChatService
   # @return [RubyLLM::Message]
   def call(user_message, &stream_block)
     @session
-      .with_model(@agent.model_id, provider: PROVIDER)
+      .with_model(@agent.model_id, provider: @agent.resolved_provider || DEFAULT_PROVIDER)
       .with_instructions(@agent.resolved_instructions)
       .with_temperature(@agent.temperature || 0.7)
       .ask(user_message, &stream_block)

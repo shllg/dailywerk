@@ -81,7 +81,12 @@ CREATE TABLE public.agents (
     is_default boolean DEFAULT false NOT NULL,
     active boolean DEFAULT true NOT NULL,
     created_at timestamp(6) without time zone NOT NULL,
-    updated_at timestamp(6) without time zone NOT NULL
+    updated_at timestamp(6) without time zone NOT NULL,
+    soul text,
+    identity jsonb DEFAULT '{}'::jsonb,
+    provider character varying,
+    params jsonb DEFAULT '{}'::jsonb,
+    thinking jsonb DEFAULT '{}'::jsonb
 );
 
 ALTER TABLE ONLY public.agents FORCE ROW LEVEL SECURITY;
@@ -953,6 +958,7 @@ CREATE POLICY workspace_isolation ON public.tool_calls TO app_user USING ((EXIST
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260331100000'),
 ('20260330100600'),
 ('20260330100560'),
 ('20260330100550'),

@@ -23,6 +23,8 @@ class Session < ApplicationRecord
     workspace = Current.workspace
     raise ArgumentError, "Current.workspace must be set" unless workspace
 
+    provider = agent.resolved_provider || SimpleChatService::DEFAULT_PROVIDER
+
     session = create_or_find_by!(
       agent:,
       workspace:,
@@ -30,23 +32,24 @@ class Session < ApplicationRecord
       status: "active"
     ) do |session|
       session.last_activity_at = Time.current
-      session.model = model_record_for(agent.model_id)
+      session.model = model_record_for(agent.model_id, provider:)
     end
 
     return session if session.model.present?
 
-    session.update!(model: model_record_for(agent.model_id))
+    session.update!(model: model_record_for(agent.model_id, provider:))
     session
   end
 
   private
 
   # @param model_id [String]
+  # @param provider [String, Symbol]
   # @return [RubyLLM::ModelRecord]
-  def self.model_record_for(model_id)
+  def self.model_record_for(model_id, provider: SimpleChatService::DEFAULT_PROVIDER.to_s)
     RubyLLM::ModelRecord.find_or_create_by!(
       model_id:,
-      provider: SimpleChatService::PROVIDER.to_s
+      provider: provider.to_s
     ) do |model|
       model.name = model_id
       model.capabilities = []

@@ -14,6 +14,7 @@ module Api
         render json: {
           session_id: session.id,
           agent: {
+            id: agent.id,
             slug: agent.slug,
             name: agent.name
           },

@@ -18,6 +18,7 @@ export interface ToolCall {
 }
 
 export interface Agent {
+  id: string
   slug: string
   name: string
 }

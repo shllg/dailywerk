@@ -19,6 +19,7 @@ describe('chatApi', () => {
       json: async () => ({
         session_id: 'session-1',
         agent: {
+          id: 'agent-1',
           slug: 'main',
           name: 'DailyWerk',
         },
@@ -44,6 +45,7 @@ describe('chatApi', () => {
     expect(chat).toMatchObject({
       sessionId: 'session-1',
       agent: {
+        id: 'agent-1',
         slug: 'main',
         name: 'DailyWerk',
       },

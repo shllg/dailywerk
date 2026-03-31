@@ -40,9 +40,10 @@ class Api::V1::ChatControllerTest < ActionDispatch::IntegrationTest
     body = JSON.parse(response.body)
 
     assert_equal(
-      [ session.id, @agent.name, %w[user assistant] ],
+      [ session.id, @agent.id, @agent.name, %w[user assistant] ],
       [
         body["session_id"],
+        body.dig("agent", "id"),
         body.dig("agent", "name"),
         body["messages"].map { |message| message["role"] }
       ]

@@ -2,15 +2,22 @@ import { useEffect, useState } from 'react'
 import { useActionCableChat } from '../../hooks/useActionCableChat'
 import { useAutoScroll } from '../../hooks/useAutoScroll'
 import { fetchChat } from '../../services/chatApi'
+import type { Agent as ChatAgent } from '../../types/chat'
 import { MessageBubble } from './MessageBubble'
 import { MessageInput } from './MessageInput'
 import { TypingIndicator } from './TypingIndicator'
 
 export interface ChatContainerProps {
+  onAgentLoaded?: (agent: ChatAgent | null) => void
+  reloadKey?: number
   token: string
 }
 
-export function ChatContainer({ token }: ChatContainerProps) {
+export function ChatContainer({
+  onAgentLoaded,
+  reloadKey = 0,
+  token,
+}: ChatContainerProps) {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [agentName, setAgentName] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -39,6 +46,7 @@ export function ChatContainer({ token }: ChatContainerProps) {
         setSessionId(chat.sessionId)
         setAgentName(chat.agent.name)
         setActiveAgent(chat.agent.name)
+        onAgentLoaded?.(chat.agent)
         setMessages(
           chat.messages.map((message) =>
             message.role === 'assistant'
@@ -52,6 +60,7 @@ export function ChatContainer({ token }: ChatContainerProps) {
         if (cancelled) return
         setSessionId(null)
         setAgentName(null)
+        onAgentLoaded?.(null)
         setActiveAgent(null)
         setMessages([])
         setError(err.message)
@@ -65,7 +74,7 @@ export function ChatContainer({ token }: ChatContainerProps) {
     return () => {
       cancelled = true
     }
-  }, [reloadCount, setActiveAgent, setMessages, token])
+  }, [onAgentLoaded, reloadCount, reloadKey, setActiveAgent, setMessages, token])
 
   useEffect(() => {
     scrollIfAtBottom()

@@ -59,6 +59,7 @@ describe('App', () => {
         json: async () => ({
           session_id: 'session-1',
           agent: {
+            id: 'agent-1',
             slug: 'main',
             name: 'DailyWerk',
           },

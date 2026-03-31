@@ -40,12 +40,27 @@ class SimpleChatServiceTest < ActiveSupport::TestCase
     assert_equal :response, response
     assert_equal(
       [
-        [ :with_model, "gpt-5.4", :openai_responses ],
+        [ :with_model, "gpt-5.4", SimpleChatService::DEFAULT_PROVIDER ],
         [ :with_instructions, "Be concise." ],
         [ :with_temperature, 0.2 ],
         [ :ask, "Hello" ]
       ],
       session.calls
     )
+  end
+
+  test "uses the agent provider when one is configured" do
+    agent = Agent.new(
+      name: "DailyWerk",
+      model_id: "claude-3-7-sonnet",
+      provider: "anthropic",
+      instructions: "Be concise.",
+      temperature: 0.2
+    )
+    session = FakeSession.new(agent:, calls: [])
+
+    SimpleChatService.new(session:).call("Hello")
+
+    assert_equal [ :with_model, "claude-3-7-sonnet", :anthropic ], session.calls.first
   end
 end
