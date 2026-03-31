@@ -11,6 +11,9 @@ depends_on:
   - prd/04-billing-and-operations
 implemented_by:
   - rfc/2026-03-29-simple-chat-conversation
+  - rfc/2026-03-31-agent-configuration
+  - rfc/2026-03-31-agent-session-management
+  - rfc/2026-03-31-debug-tools
 ---
 
 # DailyWerk — Agentic System
@@ -20,7 +23,7 @@ implemented_by:
 > For channel adapters and vault sync: see [02-integrations-and-channels.md](./02-integrations-and-channels.md).
 > For BYOK, MCP, cost tracking, and GoodJob config: see [04-billing-and-operations.md](./04-billing-and-operations.md).
 
-**Implementation status:** [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) implements the first slice — simple chat with a single agent (no tools, no memory, no handoffs). Sections below describe the full target architecture.
+**Implementation status:** [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) implements the first slice — simple chat with a single agent (no tools, no memory, no handoffs). [RFC Agent Configuration](../rfc-open/2026-03-31-agent-configuration.md) adds soul/identity/thinking config with reset-to-defaults. [RFC Session Management](../rfc-open/2026-03-31-agent-session-management.md) adds compaction, context building, and session archival. [RFC Debug Tools](../rfc-open/2026-03-31-debug-tools.md) adds developer-mode debugging UI. Sections below describe the full target architecture.
 
 ---
 
@@ -949,8 +952,8 @@ AgentRuntime.new(session:, user:)
 
 ## 13. Open Questions
 
-1. **Session quality & robustness** — The most complex subsystem. Needs detailed design for: smart compaction algorithms (what to keep vs summarize), session replay for debugging, long message summarization before sending to LLM, message searchability across sessions, memory promotion heuristics. Priority for next design phase.
-2. **Compaction concurrency** — Advisory lock prevents concurrent compaction on same session, but rapid back-and-forth near the threshold needs testing.
+1. **Session quality & robustness** — ~~Needs detailed design for: smart compaction algorithms, session replay for debugging, long message summarization, message searchability.~~ Partially addressed by [RFC Session Management](../rfc-open/2026-03-31-agent-session-management.md) (compaction, long message summarization via `MessageSummarizer`, media description for context replay) and [RFC Debug Tools](../rfc-open/2026-03-31-debug-tools.md) (session replay/inspection). **Remaining**: message searchability across sessions, memory promotion heuristics.
+2. **Compaction concurrency** — ~~Advisory lock prevents concurrent compaction on same session.~~ Addressed by [RFC Session Management](../rfc-open/2026-03-31-agent-session-management.md) — uses GoodJob `perform_limit: 1` concurrency controls instead of advisory locks (fiber-safe).
 3. **Provider failover** — LLM router should fall back to OpenRouter when primary provider fails. Not yet implemented in AgentRuntime.
 4. **Handoff cycle detection** — Currently relies on `handoff_targets` not containing cycles. Should validate acyclicity at agent save time (topological sort or DFS).
-5. **Session continuity verification** — Verify that ruby_llm's `acts_as_chat` auto-loads persisted messages into the chat context. If not, explicit message injection is needed.
+5. **Session continuity verification** — Verify that ruby_llm's `acts_as_chat` auto-loads persisted messages into the chat context. If not, explicit message injection is needed. **Spike planned** in [RFC Session Management](../rfc-open/2026-03-31-agent-session-management.md) Phase 1.

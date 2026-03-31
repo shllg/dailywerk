@@ -12,6 +12,9 @@ depends_on:
 implemented_by:
   - rfc/2026-03-29-simple-chat-conversation
   - rfc/2026-03-30-workspace-isolation
+  - rfc/2026-03-31-agent-configuration
+  - rfc/2026-03-31-agent-session-management
+  - rfc/2026-03-31-debug-tools
 ---
 1
 # DailyWerk — Platform & Infrastructure
