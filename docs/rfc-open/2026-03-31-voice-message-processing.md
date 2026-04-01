@@ -297,7 +297,7 @@ class WorkspaceStorageService
   end
 
   def sse_c_params
-    key = @workspace.encryption_key
+    key = @workspace.encryption_key_enc  # Decrypted automatically by Rails
     return {} unless key
 
     {
@@ -323,6 +323,15 @@ class WorkspaceStorageService
   end
 end
 ```
+
+**Encryption key source**: The `workspaces` table does not currently have an `encryption_key` column. This RFC requires adding one:
+
+```ruby
+# Migration: add workspace-level encryption key for non-vault media storage
+add_column :workspaces, :encryption_key_enc, :text
+```
+
+The workspace-level key encrypts media outside of vaults (voice messages, images, file attachments). Vault data continues to use per-vault keys. The key is generated at workspace creation alongside the vault key, stored via `ActiveRecord::Encryption`, and follows the same SSE-C pattern.
 
 ### 6.2 TranscriptionService
 
@@ -568,6 +577,21 @@ class VoiceProcessingJob < ApplicationJob
 end
 ```
 
+**Security note**: The `bridge_api_key` should not be passed as a job argument — it would be visible in the GoodJob dashboard and stored in the `good_jobs` table. Instead, pass the `bridge_id` and look up the key inside the job:
+
+```ruby
+def perform(message_id, download_url:, bridge_id:, workspace_id:)
+  message = Message.find(message_id)
+  bridge = Bridge.find(bridge_id)
+
+  VoiceMessageProcessor.new(
+    message:,
+    download_url:,
+    bridge_api_key: bridge.api_key_hash  # Looked up at execution time
+  ).call
+end
+```
+
 ---
 
 ## 8. ChatStreamJob Integration
@@ -611,7 +635,7 @@ def respond(&stream_block)
   trigger_compaction_if_needed
 
   context = ContextBuilder.new(session: @session, agent: @agent).build
-  provider = @agent.resolved_provider || SimpleChatService::PROVIDER
+  provider = @agent.resolved_provider || AgentRuntime::DEFAULT_PROVIDER
 
   # Ask with empty string — acts_as_chat sees the existing user message
   # in the session and generates only the assistant response.
@@ -623,7 +647,13 @@ def respond(&stream_block)
 end
 ```
 
-**Spike required**: Verify that `session.ask("")` with an existing user message in the session generates only the assistant turn. If ruby_llm creates a blank user message, an alternative approach is needed (e.g., directly calling the provider API via ruby_llm's lower-level interface).
+**Spike required**: Verify that `session.ask("")` with an existing user message in the session generates only the assistant turn without creating a blank user message. If ruby_llm creates a blank user message, alternatives:
+
+1. **`session.continue`**: If ruby_llm supports a `continue` method that generates an assistant response for the existing last user message without adding a new one.
+2. **Direct provider call**: Use ruby_llm's lower-level chat API to send only the assistant generation request, passing the existing message history.
+3. **Skip-create flag**: Modify `acts_as_chat` to accept a flag that suppresses user message creation on `ask`.
+
+This is a blocking spike for Phase 4 — voice messages will not work correctly without resolving this.
 
 ---
 

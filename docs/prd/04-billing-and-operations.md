@@ -3,7 +3,7 @@ type: prd
 title: Billing & Operations
 domain: billing
 created: 2026-03-28
-updated: 2026-03-28
+updated: 2026-04-01
 status: canonical
 depends_on:
   - prd/01-platform-and-infrastructure
@@ -98,7 +98,7 @@ Routes by task type, user plan, agent config overrides, provider health. Falls b
 2. **Execute**: Proceed with the LLM call. Usage is recorded in `usage_records`.
 3. **Reconcile**: `CreditReconcilerJob` (every 4 hours) compares reserved vs actual costs. Adjusts balance for over/under-estimates.
 
-For high-concurrency scenarios, use Valkey as an in-memory accumulator (`DECRBY user:{id}:balance estimated`) with periodic flush to PostgreSQL. This avoids row-level lock contention on `credit_balances`.
+For high-concurrency scenarios, use Valkey as an in-memory accumulator (`DECRBY workspace:{id}:balance estimated`) with periodic flush to PostgreSQL. This avoids row-level lock contention on `credit_balances`.
 
 ---
 
@@ -152,7 +152,7 @@ Hooked into the [AgentRuntime](./03-agentic-system.md#3-agent-runtime-react-loop
 ```ruby
 # app/services/usage_recorder.rb
 class UsageRecorder
-  def self.record(message:, session:, user:)
+  def self.record(message:, session:, workspace:)
     return unless message.input_tokens.to_i > 0 || message.output_tokens.to_i > 0
 
     model_id = session.model_id || session.agent.model_id
@@ -166,7 +166,7 @@ class UsageRecorder
     )
 
     UsageRecord.create!(
-      user: user,
+      workspace: workspace,
       session: session,
       message: message,
       agent_slug: message.agent_slug,
@@ -225,11 +225,11 @@ end
 class BudgetEnforcer
   class BudgetExceededError < StandardError; end
 
-  def self.check_and_reserve!(user:, estimated_credits:)
+  def self.check_and_reserve!(workspace:, estimated_credits:)
     # Atomic reserve — prevents TOCTOU race
-    rows = CreditBalance.where(user: user)
+    rows = CreditBalance.where(workspace: workspace)
       .where("balance >= ?", estimated_credits)
-      .update_all("balance = balance - #{estimated_credits.to_i}")
+      .update_all(["balance = balance - ?", estimated_credits.to_i])
 
     raise BudgetExceededError,
       "Credit balance exhausted. Add credits or enable overage billing." if rows == 0
@@ -262,8 +262,8 @@ class ApiCredential < ApplicationRecord
 
   scope :active, -> { where(active: true) }
 
-  def self.resolve(user:, provider:)
-    find_by(user: user, provider: provider, active: true)
+  def self.resolve(workspace:, provider:)
+    find_by(workspace: workspace, provider: provider, active: true)
   end
 
   def api_key
@@ -289,10 +289,10 @@ class LlmContextBuilder
     "openrouter" => :openrouter_api_base
   }.freeze
 
-  def self.build(user:)
+  def self.build(workspace:)
     RubyLLM.context do |config|
       %w[openai anthropic openrouter].each do |provider|
-        cred = ApiCredential.resolve(user: user, provider: provider)
+        cred = ApiCredential.resolve(workspace: workspace, provider: provider)
         next unless cred
 
         config.send(:"#{PROVIDER_KEY_MAP[provider]}=", cred.api_key)
@@ -310,18 +310,22 @@ end
 ```ruby
 # app/controllers/api/v1/api_credentials_controller.rb
 class Api::V1::ApiCredentialsController < ApplicationController
-  ALLOWED_API_BASES = %w[
-    https://api.openai.com
-    https://api.anthropic.com
-    https://openrouter.ai/api
+  # Host-level allowlist prevents SSRF via api_base.
+  # start_with? is NOT safe — "api.openai.com.evil.com" would pass.
+  # Use URI.parse + host match instead.
+  ALLOWED_API_HOSTS = %w[
+    api.openai.com
+    api.anthropic.com
+    openrouter.ai
   ].freeze
 
   def create
-    cred = current_user.api_credentials.build(credential_params)
+    cred = Current.workspace.api_credentials.build(credential_params)
 
-    # SSRF protection: validate api_base against allowlist
+    # SSRF protection: validate api_base host against allowlist
     if cred.api_base.present?
-      unless ALLOWED_API_BASES.any? { |base| cred.api_base.start_with?(base) }
+      parsed = URI.parse(cred.api_base) rescue nil
+      unless parsed&.scheme == "https" && ALLOWED_API_HOSTS.include?(parsed.host)
         return render json: { error: "Custom API base not allowed. Contact admin." },
                       status: :unprocessable_entity
       end
@@ -353,6 +357,17 @@ end
 
 Custom `api_base` URLs (Azure, self-hosted) require admin approval — not user-settable via this endpoint. This prevents SSRF attacks where an attacker probes internal infrastructure via the key validation HTTP call.
 
+### BYOK Cost Attribution
+
+BYOK usage does **not** consume DailyWerk credits — the user's own API key is billed directly by the provider. However, all BYOK usage is still recorded in `usage_records` with `request_type: "chat"` and a `byok: true` metadata flag. This enables:
+
+- Per-workspace usage dashboards showing total activity regardless of billing source
+- Anomaly detection (unusual usage patterns even on BYOK keys)
+- Capacity planning (BYOK users still consume server resources — compute, bandwidth, ActionCable connections)
+- Future analytics features
+
+The provider registry's `internal_credit_rate` is not applied to BYOK calls. The `CostCalculator` returns `total_cost: 0` for BYOK requests but still records token counts and latency in `usage_records`.
+
 ---
 
 ## 7. MCP Support — User Configurable
@@ -364,35 +379,41 @@ For the `mcp_server_configs` schema, see [01 §5.9](./01-platform-and-infrastruc
 **Note on gem maturity**: `ruby_llm-mcp` is at v0.0.2 as of March 2026. The API surface may differ from the examples below. Verify compatibility before implementation.
 
 ```ruby
-# User-configurable MCP servers: only remote transports allowed
+# User-configurable MCP servers: ONLY remote transports allowed.
+# stdio executes arbitrary commands on the server — admin-only, never user-configurable.
 validates :transport_type, inclusion: { in: %w[streamable sse] },
-  message: "stdio transport is admin-only (security: prevents arbitrary command execution)"
+  message: "only remote transports (streamable, sse) are allowed for user-configured servers. " \
+           "stdio transport executes arbitrary commands and is restricted to admin-configured system integrations."
 ```
 
 **Security**: MCP `stdio` transport executes arbitrary commands on the server. It is restricted to admin-configured system integrations only. User-configurable MCP servers must use `streamable` or `sse` (HTTP-based) transports.
+
+**Hardening:** User-submitted MCP server URLs must pass SSRF validation (no private IPs, no localhost, HTTPS required). The `allowed_tools` / `blocked_tools` lists on `mcp_server_configs` provide per-server tool authorization. Admin review is required before any user-configured MCP server is activated in production.
 
 ### MCP Client Manager
 
 ```ruby
 # app/services/mcp_client_manager.rb
 class McpClientManager
-  # Cache clients per-process to reuse connections (MCP servers are stateful)
-  # WARNING: This cache is process-scoped. Under Falcon (multi-process),
-  # config invalidation only clears the current process's cache.
+  # Plain Hash is safe here — Falcon's fibers are cooperatively scheduled
+  # within a single thread, so no concurrent mutation is possible.
+  # Concurrent::Map uses mutexes internally which can deadlock under fibers.
+  # This cache is process-scoped: GoodJob workers (separate processes)
+  # do not share this cache and will cold-start MCP clients per invocation.
   # Use Valkey pub/sub for cross-process invalidation in production.
-  CLIENTS = Concurrent::Map.new
+  CLIENTS = {}
 
-  def self.clients_for(user:)
-    configs = McpServerConfig.where(user: user, active: true)
+  def self.clients_for(workspace:)
+    configs = McpServerConfig.where(workspace: workspace, active: true)
 
     configs.map do |config|
       cache_key = "#{config.id}:#{config.updated_at.to_i}"
-      CLIENTS.compute_if_absent(cache_key) { build_client(config) }
+      CLIENTS[cache_key] ||= build_client(config)
     end
   end
 
-  def self.tools_for(user:, agent: nil)
-    configs = McpServerConfig.where(user: user, active: true)
+  def self.tools_for(workspace:, agent: nil)
+    configs = McpServerConfig.where(workspace: workspace, active: true)
 
     # Per-agent MCP access control
     if agent&.enabled_mcps.present?
@@ -403,7 +424,7 @@ class McpClientManager
 
     configs.flat_map do |config|
       cache_key = "#{config.id}:#{config.updated_at.to_i}"
-      client = CLIENTS.compute_if_absent(cache_key) { build_client(config) }
+      client = CLIENTS[cache_key] ||= build_client(config)
       tools = client.tools
 
       # Apply allow/block lists
@@ -437,7 +458,7 @@ class McpClientManager
   end
 
   def self.invalidate(config_id)
-    CLIENTS.each_pair do |key, _|
+    CLIENTS.keys.each do |key|
       CLIENTS.delete(key) if key.start_with?("#{config_id}:")
     end
   end
@@ -450,7 +471,7 @@ end
 # app/controllers/mcp/oauth_controller.rb
 class Mcp::OauthController < ApplicationController
   def initiate
-    config = current_user.mcp_server_configs.find(params[:id])
+    config = Current.workspace.mcp_server_configs.find(params[:id])
     client = McpClientManager.build_client(config)
     state = SecureRandom.urlsafe_base64(32)
     session[:mcp_oauth_state] = state
@@ -467,7 +488,7 @@ class Mcp::OauthController < ApplicationController
       return redirect_to settings_integrations_path, alert: "OAuth CSRF detected"
     end
 
-    config = current_user.mcp_server_configs.find(params[:config_id])
+    config = Current.workspace.mcp_server_configs.find(params[:config_id])
     client = McpClientManager.build_client(config)
 
     token = client.oauth(type: :web).exchange_code(
@@ -490,6 +511,8 @@ MCP tools returned by `ruby_llm-mcp` are `RubyLLM::Tool`-compatible — they plu
 ---
 
 ## 8. GoodJob Configuration
+
+> **Single source of truth.** This section is the canonical registry for all GoodJob cron entries across the platform. RFCs propose new entries here; they do not define independent schedules. When implementing an RFC that needs a cron job, add it to this section.
 
 **Canonical home for all background job configuration.** GoodJob runs in **external mode** (separate worker process) for production. See [01 §2](./01-platform-and-infrastructure.md#2-stack-decisions) for rationale.
 
@@ -548,11 +571,13 @@ Rails.application.configure do
       class: "RefreshEmbeddingsJob",
       description: "Generate embeddings for records missing them"
     },
-    renew_gmail_watch: {
-      cron: "0 0 */6 * *",            # Every 6 days
-      class: "RenewGmailWatchJob",
-      description: "Renew Gmail push notification subscriptions"
-    },
+    # renew_gmail_watch: DEFERRED — Gmail API integration requires CASA verification.
+    # See PRD 06 (Gmail Direct Integration). Uncomment when Gmail ships.
+    # renew_gmail_watch: {
+    #   cron: "0 0 */6 * *",
+    #   class: "RenewGmailWatchJob",
+    #   description: "Renew Gmail push notification subscriptions"
+    # },
     todo_sync: {
       cron: "*/2 * * * *",            # Every 2 minutes
       class: "TodoSyncWorker",
@@ -567,6 +592,72 @@ Rails.application.configure do
       cron: "0 */4 * * *",            # Every 4 hours
       class: "CreditReconcilerJob",
       description: "Reconcile pre-deducted credits with actual usage"
+    },
+
+    # --- Calendar & Google (RFC: Google Integration) ---
+    renew_calendar_watch: {
+      cron: "0 3 * * *",              # Daily at 3am
+      class: "RenewCalendarWatchJob",
+      description: "Renew Google Calendar push notification channels"
+    },
+    google_token_refresh: {
+      cron: "0 * * * *",              # Hourly
+      class: "GoogleTokenRefreshJob",
+      description: "Proactively refresh Google OAuth tokens nearing expiry"
+    },
+    google_connection_health: {
+      cron: "0 */6 * * *",            # Every 6 hours
+      class: "GoogleConnectionHealthJob",
+      description: "Health check Google connections, detect revocations"
+    },
+
+    # --- Vault (RFC: Vault Filesystem, Vault Backup, Obsidian Sync) ---
+    vault_s3_sync: {
+      cron: "*/5 * * * *",            # Every 5 minutes
+      class: "VaultS3SyncJob",
+      description: "Sync local vault checkouts to S3 canonical store"
+    },
+    vault_reindex_stale: {
+      cron: "0 */2 * * *",            # Every 2 hours
+      class: "VaultReindexStaleJob",
+      description: "Re-index vault files with stale or missing embeddings"
+    },
+    vault_reconciliation: {
+      cron: "0 */6 * * *",            # Every 6 hours
+      class: "VaultReconciliationJob",
+      description: "Reconcile disk vs DB state for vault files (inotify catch-up)"
+    },
+    vault_daily_snapshot: {
+      cron: "0 2 * * *",              # Daily at 2am
+      class: "VaultSnapshotJob",
+      description: "Create daily snapshots for all active vaults"
+    },
+    vault_version_cleanup: {
+      cron: "0 3 * * 0",              # Weekly Sunday 3am
+      class: "VaultVersionCleanupJob",
+      description: "Prune vault file versions and snapshots beyond 30-day retention"
+    },
+    vault_metrics: {
+      cron: "0 */4 * * *",            # Every 4 hours
+      class: "VaultMetricsJob",
+      description: "Aggregate per-workspace vault storage metrics for admin monitoring"
+    },
+    obsidian_sync_health: {
+      cron: "* * * * *",              # Every minute
+      class: "ObsidianSyncHealthCheckJob",
+      description: "Check health of obsidian-headless processes, restart crashed ones"
+    },
+
+    # --- Email (RFC: IMAP/SMTP Integration) ---
+    email_poll: {
+      cron: "*/5 * * * *",            # Every 5 minutes
+      class: "EmailPollJob",
+      description: "Poll IMAP mailboxes for new messages"
+    },
+    email_connection_health: {
+      cron: "0 */6 * * *",            # Every 6 hours
+      class: "EmailConnectionHealthJob",
+      description: "Test IMAP/SMTP connections, detect auth failures"
     }
   }
 
@@ -641,7 +732,7 @@ end
 
 ```ruby
 # Gemfile
-gem "rails", "~> 8.0"
+gem "rails", "~> 8.1"
 gem "pg", "~> 1.5"
 gem "redis", "~> 5.0"  # Valkey-compatible
 gem "falcon", "~> 0.48"

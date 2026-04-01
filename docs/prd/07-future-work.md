@@ -3,7 +3,7 @@ type: prd
 title: Future Work
 domain: planning
 created: 2026-03-31
-updated: 2026-03-31
+updated: 2026-04-01
 status: living
 depends_on:
   - prd/01-platform-and-infrastructure
@@ -96,7 +96,9 @@ depends_on:
 
 | Item | Source | Notes |
 |------|--------|-------|
-| Rate limiting | PRD 04 §10.1, PRD 01 §8.11 | Per-user requests/minute in Valkey. Per-provider rate limiting for API quotas. |
+| Usage tracking & provider cost attribution | PRD 04 §2-4 | (RFC in progress) Provider pricing, CostCalculator, adapter pattern, usage_records. See [RFC: Usage Tracking](../rfc-open/2026-03-31-usage-tracking-provider-cost.md). |
+| Credit system & billing | PRD 04 §3-5 | (RFC in progress) Credit pricing, BudgetEnforcer, Stripe webhooks, margin tracking. Depends on Usage Tracking RFC. See [RFC: Credit System](../rfc-open/2026-03-31-credit-system-billing.md). |
+| Rate limiting | PRD 04 §10.1, PRD 01 §8 | Per-workspace requests/minute in Valkey. Per-provider rate limiting for API quotas. |
 | Error handling / retry strategy | PRD 04 §10.2 | LLM call failures, provider timeouts, rate limit responses. Provider failover in LLM router. |
 | MCP client cross-process invalidation | PRD 04 §10.3 | `Concurrent::Map` cache is process-scoped. Need Valkey pub/sub for Falcon multi-process. |
 | ReAct loop JSON failure handling | PRD 04 §10.4 | Retry when LLM outputs invalid tool JSON. Feed parse error back, cap at 3 retries. |
@@ -109,13 +111,16 @@ depends_on:
 
 | Item | Source | Notes |
 |------|--------|-------|
-| Observability design | PRD 01 §8.5, §8.9 | Logging, metrics, alerting, health checks, session replay for debugging. |
-| GDPR / data deletion | PRD 01 §8.6, §8.10 | `UserDeletionService` for hard-delete across PG, S3, Valkey, vault checkouts. |
+| Observability design | PRD 01 §8 | Logging, metrics, alerting, health checks, session replay for debugging. |
+| GDPR / data deletion | PRD 01 §8 | `WorkspaceDeletionService` for hard-delete across PG, S3, Valkey, vault checkouts. |
 | SPA authentication design | PRD 01 §8.7 | React SPA + Rails API shared root domain for HttpOnly/Secure/SameSite cookie-based auth. JWT in localStorage = XSS vector. |
 | Connection pooling (PgBouncer) | PRD 01 §8.8 | Falcon at scale needs PgBouncer. Transaction-mode conflicts with session-level SET for RLS. |
 | Shared resources / agent sharing | PRD 01 §4.5 | `agent_shares` table for sub-workspace sharing. Layer on top of workspace model. |
 | Envelope encryption with KMS | PRD 01 §4.3 | Rails master key → per-workspace DEK → KMS-managed KEK. Prevents data access from DB compromise alone. |
 | Webhook idempotency | PRD 02 §8.3 | Bridge webhooks need idempotency keys (dedup by `event_id` or content hash). |
+| Prompt injection hardening | PRD 03 §2, Audit 2026-03-31 | Output filtering, sandboxed prompt placement, tool-level auth enforcement. See `/prompt-injection-review` command. |
+| Authorization framework | Audit 2026-03-31 | Lightweight authorization (cancancan or action_policy) for debug endpoints, admin features, and future billing. |
+| Dependency audit CI | Audit 2026-03-31 | Add `bundler-audit` and `brakeman` to CI pipeline. Currently manual. |
 
 ---
 
@@ -125,7 +130,7 @@ depends_on:
 |------|--------|-------|
 | Component patterns codification | PRD 01 §8.4 | Vite + React + TypeScript + Tailwind + DaisyUI patterns to be codified after more features ship. |
 | Agent management dashboard | PRD 03 §2 | Create/edit/delete agents, configure tools, set personality. |
-| Usage/billing dashboard | PRD 04 §4 | Per-user token usage, cost breakdown by model, credit balance. |
+| Usage/billing dashboard | PRD 04 §4 | Per-workspace token usage, cost breakdown by model, credit balance. Minimal stats in [RFC: Usage Tracking](../rfc-open/2026-03-31-usage-tracking-provider-cost.md); full dashboard deferred. |
 | GoodJob admin dashboard access | PRD 04 §8 | Mount behind admin auth. |
 | Vault file browser | RFC: Vault Filesystem | Tree view, file preview, upload/download, vault guide editor. |
 | Settings pages | RFC: Agent Config | Agent configuration UI, integration management, sync status. |

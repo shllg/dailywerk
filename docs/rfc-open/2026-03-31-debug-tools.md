@@ -93,7 +93,7 @@ module RequireDeveloperMode
 end
 ```
 
-**Future**: When multi-user workspaces ship, this concern should additionally check that the current user has `owner` or `admin` role on the workspace. Debug tools expose system prompts and raw tool results which are sensitive.
+**Access control**: For MVP (single-user workspaces), the workspace owner has implicit access when `developer_mode` is enabled. When multi-user workspaces ship, add role-based gating: only `owner` and `admin` roles on `workspace_memberships` may access debug endpoints. Debug tools expose system prompts and raw tool results which are sensitive. Consider using a lightweight authorization library (e.g., `cancancan` or `action_policy`) to centralize permission checks across debug, admin, and future billing endpoints.
 
 ---
 
@@ -302,7 +302,7 @@ class Api::V1::Debug::ContextController < ApplicationController
       context_window_usage: session.context_window_usage.round(3),
       model: {
         id: session.agent.model_id,
-        provider: session.agent.resolved_provider&.to_s || SimpleChatService::PROVIDER.to_s,
+        provider: session.agent.resolved_provider&.to_s || AgentRuntime::DEFAULT_PROVIDER.to_s,
         context_window: session.context_window_size
       }
     }
@@ -615,6 +615,7 @@ AppShell
 - **Tool call data**: Future tool results (vault files, email content) may contain sensitive data. Debug views should display the same data the user already has access to — no privilege escalation.
 - **No write operations**: All debug endpoints are read-only. No mutations are possible through the debug API.
 - **Rate limiting**: Debug endpoints return potentially large payloads. Consider rate limiting (e.g., 60 requests/minute) to prevent abuse.
+- **Audit logging**: All debug endpoint access is logged with workspace_id, user_id, endpoint, and timestamp. Auto-disable developer mode after 7 days of inactivity as a safety measure.
 
 ---
 

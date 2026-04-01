@@ -157,7 +157,7 @@ PRD-level invariants:
 
 On workspace creation, generate a unique AES-256 key → store it encrypted in PostgreSQL (Rails credentials / KMS). Every S3 PUT/GET includes SSE-C headers with the workspace key. Hetzner encrypts, then discards the key. Cross-workspace reads remain impossible even if the bucket is compromised.
 
-**Future**: Envelope encryption with external KMS (e.g., Hashicorp Vault). The Rails master key encrypts a per-user DEK, but the DEK itself should be wrapped by a KMS-managed key. Database compromise alone should be insufficient to access vault data.
+**Future**: Envelope encryption with external KMS (e.g., Hashicorp Vault). The Rails master key encrypts a per-workspace DEK, but the DEK itself should be wrapped by a KMS-managed key. Database compromise alone should be insufficient to access vault data.
 
 ### 4.4 Workspace Memberships
 
@@ -175,11 +175,11 @@ If sub-workspace sharing is ever needed, layer it on top of the workspace model 
 
 ```sql
 -- Lightweight sharing without tenant refactor
-agent_shares (id, agent_id, owner_user_id, shared_with_user_id,
+agent_shares (id, agent_id, source_workspace_id, target_workspace_id,
               permission enum(read,use,admin), created_at)
 ```
 
-RLS policies can be extended to include shared resources: `USING (workspace_id = current_workspace_id OR id IN (SELECT agent_id FROM agent_shares WHERE shared_with_user_id = current_user_id))`.
+RLS policies can be extended to include shared resources: `USING (workspace_id = current_workspace_id OR id IN (SELECT agent_id FROM agent_shares WHERE target_workspace_id = current_workspace_id))`.
 
 ---
 
@@ -330,7 +330,7 @@ class CreateMemoryTables < ActiveRecord::Migration[8.0]
   def change
     # Tier 1 — Long-term memory entries (curated key facts)
     create_table :memory_entries, id: :uuid do |t|
-      t.references :user,    type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.references :agent,   type: :uuid, foreign_key: true  # NULL = shared memory
       t.references :session, type: :uuid, foreign_key: true   # Source session
       t.string   :category,    default: "general"
@@ -345,25 +345,25 @@ class CreateMemoryTables < ActiveRecord::Migration[8.0]
       t.timestamps
 
       t.index :embedding, using: :hnsw, opclass: :vector_cosine_ops
-      t.index [:user_id, :category]
-      t.index [:user_id, :active, :importance]
-      t.index [:user_id, :agent_id]
+      t.index [:workspace_id, :category]
+      t.index [:workspace_id, :active, :importance]
+      t.index [:workspace_id, :agent_id]
     end
 
     # Tier 2 — Daily logs (auto-written by agent, today+yesterday loaded)
     create_table :daily_logs, id: :uuid do |t|
-      t.references :user,  type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.references :agent, type: :uuid, foreign_key: true
       t.date     :date,    null: false
       t.text     :content, null: false
       t.timestamps
 
-      t.index [:user_id, :agent_id, :date], unique: true
+      t.index [:workspace_id, :agent_id, :date], unique: true
     end
 
     # Notes — persistent agent note-taking with semantic search
     create_table :notes, id: :uuid do |t|
-      t.references :user,    type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.references :session, type: :uuid, foreign_key: true
       t.string   :title
       t.text     :content,   null: false
@@ -373,14 +373,14 @@ class CreateMemoryTables < ActiveRecord::Migration[8.0]
       t.timestamps
 
       t.index :embedding, using: :hnsw, opclass: :vector_cosine_ops
-      t.index [:user_id, :created_at]
+      t.index [:workspace_id, :created_at]
       t.index :tags, using: :gin
     end
 
     # Conversation archives — cold storage summaries with semantic search
     create_table :conversation_archives, id: :uuid do |t|
       t.references :session, type: :uuid, null: false, foreign_key: true
-      t.references :user, type: :uuid, null: false, foreign_key: true  # Denormalized for RLS — also available via session.user_id
+      t.references :workspace, type: :uuid, null: false, foreign_key: true  # Denormalized for RLS — also available via session.workspace_id
       t.text     :summary
       t.jsonb    :key_facts,     default: []
       t.integer  :message_count
@@ -404,7 +404,7 @@ class CreateVaultTables < ActiveRecord::Migration[8.0]
   def change
     # Vaults — multi-vault support, per-vault encryption
     create_table :vaults, id: :uuid do |t|
-      t.references :user,   type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.string   :name,     null: false
       t.string   :slug,     null: false
       t.string   :vault_type, default: "native"  # obsidian, native
@@ -413,13 +413,13 @@ class CreateVaultTables < ActiveRecord::Migration[8.0]
       t.string   :status,   default: "active"     # active, syncing, error
       t.timestamps
 
-      t.index [:user_id, :slug], unique: true
+      t.index [:workspace_id, :slug], unique: true
     end
 
     # Vault files — metadata tracking for S3-backed files
     create_table :vault_files, id: :uuid do |t|
       t.references :vault, type: :uuid, null: false, foreign_key: true
-      t.references :user,  type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.string   :path,    null: false
       t.string   :content_hash
       t.bigint   :size_bytes
@@ -433,7 +433,7 @@ class CreateVaultTables < ActiveRecord::Migration[8.0]
     # Vault chunks — chunked content for hybrid search (semantic + FTS)
     create_table :vault_chunks, id: :uuid do |t|
       t.references :vault, type: :uuid, null: false, foreign_key: true
-      t.references :user,  type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.string   :file_path, null: false
       t.integer  :chunk_idx, null: false
       t.text     :content,   null: false
@@ -472,7 +472,7 @@ For task sync and calendar integration, see [02 §5-6](./02-integrations-and-cha
 class CreateTaskAndCalendarTables < ActiveRecord::Migration[8.0]
   def change
     create_table :tasks, id: :uuid do |t|
-      t.references :user,  type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.references :agent, type: :uuid, foreign_key: true
       t.string   :title,       null: false
       t.text     :description
@@ -487,12 +487,12 @@ class CreateTaskAndCalendarTables < ActiveRecord::Migration[8.0]
       t.jsonb    :metadata,    default: {}
       t.timestamps
 
-      t.index [:user_id, :status]
+      t.index [:workspace_id, :status]
       t.index [:external_provider, :external_id]
     end
 
     create_table :calendar_events, id: :uuid do |t|
-      t.references :user,  type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.references :agent, type: :uuid, foreign_key: true
       t.string   :title,       null: false
       t.text     :description
@@ -506,7 +506,7 @@ class CreateTaskAndCalendarTables < ActiveRecord::Migration[8.0]
       t.jsonb    :metadata,    default: {}
       t.timestamps
 
-      t.index [:user_id, :start_at]
+      t.index [:workspace_id, :start_at]
       t.index [:external_provider, :external_id]
     end
   end
@@ -521,13 +521,13 @@ For billing logic and cost tracking, see [04 §1-5](./04-billing-and-operations.
 class CreateBillingTables < ActiveRecord::Migration[8.0]
   def change
     create_table :credit_balances, id: false do |t|
-      t.references :user, type: :uuid, null: false, foreign_key: true, primary_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true, primary_key: true
       t.bigint   :balance, null: false, default: 0
       t.timestamps
     end
 
     create_table :credit_transactions, id: :uuid do |t|
-      t.references :user, type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.bigint   :amount,      null: false  # Positive = credit, negative = debit
       t.string   :transaction_type, null: false  # Avoids Rails STI conflict with reserved 'type' column
       # transaction_type values: grant, purchase, usage, refund, expiry
@@ -541,12 +541,12 @@ class CreateBillingTables < ActiveRecord::Migration[8.0]
       t.jsonb    :metadata,    default: {}
       t.timestamps
 
-      t.index [:user_id, :created_at]
+      t.index [:workspace_id, :created_at]
     end
 
     # Detailed usage records (per LLM call)
     create_table :usage_records, id: :uuid do |t|
-      t.references :user,    type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.references :session, type: :uuid, foreign_key: true
       t.references :message, type: :uuid, foreign_key: true
       t.string   :agent_slug
@@ -565,13 +565,13 @@ class CreateBillingTables < ActiveRecord::Migration[8.0]
       t.jsonb    :metadata,       default: {}
       t.timestamps
 
-      t.index [:user_id, :created_at]
+      t.index [:workspace_id, :created_at]
       t.index [:model_id, :created_at]
     end
 
     # Daily aggregates for fast dashboard queries
     create_table :usage_daily_summaries, id: :uuid do |t|
-      t.references :user, type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.date     :date,          null: false
       t.string   :model_id
       t.string   :provider
@@ -581,7 +581,7 @@ class CreateBillingTables < ActiveRecord::Migration[8.0]
       t.decimal  :total_cost, precision: 12, scale: 6, default: 0
       t.timestamps
 
-      t.index [:user_id, :date, :model_id, :provider], unique: true, name: "idx_usage_daily_unique"
+      t.index [:workspace_id, :date, :model_id, :provider], unique: true, name: "idx_usage_daily_unique"
     end
   end
 end
@@ -596,7 +596,7 @@ class CreateIntegrationTables < ActiveRecord::Migration[8.0]
   def change
     # General integrations (Gmail, Google Calendar, etc.)
     create_table :integrations, id: :uuid do |t|
-      t.references :user, type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.string   :provider,    null: false  # gmail, google_calendar, todoist, etc.
       t.text     :credentials_encrypted
       t.jsonb    :config,      default: {}
@@ -604,12 +604,12 @@ class CreateIntegrationTables < ActiveRecord::Migration[8.0]
       t.jsonb    :metadata,    default: {}
       t.timestamps
 
-      t.index [:user_id, :provider], unique: true
+      t.index [:workspace_id, :provider], unique: true
     end
 
     # BYOK — API credentials for LLM providers
     create_table :api_credentials, id: :uuid do |t|
-      t.references :user, type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.string   :provider,      null: false  # openai, anthropic, openrouter
       t.text     :api_key_enc,   null: false  # Rails 8 encryption
       t.string   :api_base                    # Custom endpoint (Azure, self-hosted)
@@ -617,12 +617,12 @@ class CreateIntegrationTables < ActiveRecord::Migration[8.0]
       t.jsonb    :metadata,      default: {}
       t.timestamps
 
-      t.index [:user_id, :provider], unique: true
+      t.index [:workspace_id, :provider], unique: true
     end
 
     # MCP server configurations
     create_table :mcp_server_configs, id: :uuid do |t|
-      t.references :user, type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.string   :name,            null: false
       t.string   :transport_type,  null: false, default: "streamable"  # streamable, sse (user); stdio (admin-only)
       t.string   :url                          # For streamable/sse
@@ -635,12 +635,12 @@ class CreateIntegrationTables < ActiveRecord::Migration[8.0]
       t.jsonb    :metadata,        default: {}
       t.timestamps
 
-      t.index [:user_id, :name], unique: true
+      t.index [:workspace_id, :name], unique: true
     end
 
     # Messaging bridges
     create_table :bridges, id: :uuid do |t|
-      t.references :user, type: :uuid, null: false, foreign_key: true
+      t.references :workspace, type: :uuid, null: false, foreign_key: true
       t.string   :channel,      null: false  # signal, telegram, whatsapp
       t.string   :bridge_type,  null: false  # builtin, self_hosted, managed
       t.string   :api_key_hash
@@ -679,7 +679,7 @@ end
 │  GoodJob Workers (separate process, external mode)      │
 │  PostgreSQL (+pgvector) + Valkey                        │
 │  Node.js 22 (Obsidian Headless)                         │
-│  Vault checkouts: /data/vaults/{user_id}/               │
+│  Vault checkouts: /data/workspaces/{workspace_id}/vaults/│
 │  Built-in bridges (Telegram, WhatsApp)                  │
 │  SPA via Nginx/CDN                                      │
 │  S3 → Hetzner Object Storage                            │
@@ -702,7 +702,7 @@ Docker Compose for MVP. Single server for first 10 test users (keep all vaults w
 - **Strong parameters**: All controller actions use `permit` with explicit allowlists.
 - **CSRF**: API-mode Rails disables CSRF by default. WebSocket and webhook endpoints use token-based auth.
 - **SQL injection**: All queries use parameterized statements. RLS provides defense-in-depth.
-- **Migration safety**: Use `strong_migrations` gem. No locking DDL on large tables without `safety_assured`.
+- **Migration safety**: Use `strong_migrations` gem (mandatory for all migrations — see CLAUDE.md). No locking DDL on large tables without `safety_assured`.
 - **Service objects**: Business logic in `app/services/`. Models stay thin.
 - **Indexes**: Every foreign key indexed. Every `WHERE` clause backed by an appropriate index.
 
@@ -723,10 +723,8 @@ Docker Compose for MVP. Single server for first 10 test users (keep all vaults w
 2. **Multi-vault pricing** — Additional vaults as paid feature. Pricing TBD. Architecture supports it (vaults table, per-vault encryption, per-agent vault_access).
 3. **Shared resources** — Agent sharing, vault sharing. Deferred to post-MVP. Schema supports it via `agent_shares` pattern (§4.4).
 4. **Frontend architecture** — Vite + React + TypeScript + Tailwind + DaisyUI chosen. [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) defines the initial chat UI, app shell with top bar, and API contract. Component patterns to be codified after more features ship.
-5. **Observability** — Logging, metrics, alerting, health checks, session replay for debugging. Needs dedicated design.
-6. **GDPR / data deletion** — Define `UserDeletionService` for hard-delete of all user data across PG, S3, Valkey, and vault checkouts.
+5. **Observability** — Logging, metrics, alerting, health checks, session replay for debugging. Needs dedicated design. Covers structured logging, application metrics (Prometheus/StatsD), alerting rules, and agent session replay for debugging conversational flows.
+6. **GDPR / data deletion** — Define `WorkspaceDeletionService` for hard-delete of all workspace data across PG, S3, Valkey, and vault checkouts. Must cascade through all workspace-scoped tables, purge S3 prefixes, and clear Valkey namespace.
 7. **SPA authentication** — React SPA and Rails API must share a root domain for HttpOnly/Secure/SameSite cookie-based auth. JWT in localStorage is an XSS vector.
 8. **Connection pooling** — Falcon at scale needs PgBouncer. Transaction-mode PgBouncer conflicts with session-level SET. Evaluate statement-level pooling or connection pinning strategies.
-9. **Observability** — Logging, metrics, alerting, health checks, session replay for debugging. Needs dedicated design.
-10. **GDPR / data deletion** — `UserDeletionService` for hard-delete of all user data across PG, S3, Valkey, and vault checkouts.
-11. **Rate limiting** — Per-user request rate (requests/minute) in Valkey. Per-provider rate limiting to respect API quotas.
+9. **Rate limiting** — Per-workspace request rate (requests/minute) in Valkey. Per-provider rate limiting to respect API quotas.

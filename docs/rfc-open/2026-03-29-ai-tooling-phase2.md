@@ -24,13 +24,13 @@ DailyWerk's Claude Code and Codex configuration follows a "grow with the code" s
 **Trigger:** After RLS middleware is implemented and first 3 RLS-scoped models are committed.
 
 **Content outline:**
-- PostgreSQL Row-Level Security pattern: `SET LOCAL app.current_user_id` in middleware
+- PostgreSQL Row-Level Security pattern: `SET LOCAL app.current_workspace_id` in middleware
 - App connects as `app_user` (non-superuser) to enforce RLS
-- All user-scoped tables must have `user_id` foreign key
+- All workspace-scoped tables must have `workspace_id` foreign key
 - RLS context must be set in `around_perform` hook for GoodJob workers
-- Storage isolation: per-user S3 prefix, per-user SSE-C encryption key
-- Valkey key namespacing: `user:{user_id}:*`
-- pgvector embeddings always user-scoped
+- Storage isolation: per-workspace S3 prefix, per-workspace/per-vault SSE-C encryption key
+- Valkey key namespacing: `workspace:{workspace_id}:*`
+- pgvector embeddings always workspace-scoped
 
 **Why deferred:** RLS middleware, user model, and scoped tables don't exist yet. Rules referencing these patterns would cause AI to hallucinate implementations.
 

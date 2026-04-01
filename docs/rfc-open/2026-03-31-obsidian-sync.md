@@ -293,7 +293,12 @@ class ObsidianSyncManager
     rescue Errno::ESRCH, Errno::ECHILD
       # Process already gone
     rescue Timeout::Error
-      Process.kill("KILL", @config.process_pid) rescue nil
+      begin
+        Process.kill("KILL", @config.process_pid)
+        Process.wait(@config.process_pid)
+      rescue Errno::ESRCH, Errno::ECHILD
+        # Process already gone
+      end
     end
 
     @config.update!(process_status: "stopped", process_pid: nil)
@@ -308,11 +313,11 @@ class ObsidianSyncManager
     false
   end
 
-  # Restart with exponential backoff.
+  # Restart with exponential backoff via job rescheduling.
+  # Does NOT use sleep() — rescheduling the health check job avoids
+  # blocking GoodJob worker threads and Falcon fibers alike.
   def restart!
     stop!
-    backoff = RESTART_BACKOFF_SECONDS[[@config.consecutive_failures, RESTART_BACKOFF_SECONDS.length - 1].min]
-    sleep(backoff) # Safe in GoodJob worker context, not in Falcon
     start!
   rescue => e
     @config.update!(
@@ -360,7 +365,6 @@ class ObsidianSyncManager
       unsetenv_others: true # Prevent leaking host env to child
     )
 
-    Process.detach(pid)
     pid
   end
 
@@ -481,7 +485,9 @@ class ObsidianSyncHealthCheckJob < ApplicationJob
       )
       # Future: notify workspace owner via email/notification
     else
-      manager.restart!
+      # Exponential backoff via delayed job — avoids blocking worker threads with sleep()
+      backoff = ObsidianSyncManager::RESTART_BACKOFF_SECONDS[[config.consecutive_failures, ObsidianSyncManager::RESTART_BACKOFF_SECONDS.length - 1].min]
+      ObsidianSyncRestartJob.set(wait: backoff.seconds).perform_later(config.id, workspace_id: config.workspace_id)
     end
   end
 end
@@ -559,6 +565,8 @@ encrypts :obsidian_email_enc, deterministic: false
 encrypts :obsidian_password_enc, deterministic: false
 encrypts :obsidian_encryption_password_enc, deterministic: false
 ```
+
+**Note on `_enc` column naming**: Rails' `encrypts` directive auto-decrypts on attribute access, so reading `obsidian_email_enc` returns the plaintext email. The `_enc` suffix is a convention to remind developers the column is encrypted at rest in PostgreSQL. Alternative: use plain names (`obsidian_email`, `obsidian_password`) and rely on the `encrypts` declaration for documentation. Either convention is acceptable as long as it's consistent.
 
 ### 8.2 Credential Security Chain
 

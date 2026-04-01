@@ -78,9 +78,16 @@ has_many :messages, dependent: :destroy, inverse_of: :session
 **Solution**: Compute active context tokens on-the-fly from non-compacted messages:
 
 ```ruby
+# Context size ≈ last message's input_tokens (includes all prior context)
+# + its output_tokens. Summing input_tokens across all messages would
+# double-count because each input_tokens value includes the full prior context.
+#
+# @return [Integer]
 def active_context_tokens
-  messages.where(compacted: [false, nil])
-          .sum("coalesce(input_tokens, 0) + coalesce(output_tokens, 0)")
+  last_msg = messages.where(compacted: [false, nil]).order(:created_at).last
+  return 0 unless last_msg
+
+  last_msg.input_tokens.to_i + last_msg.output_tokens.to_i
 end
 ```
 
@@ -313,12 +320,16 @@ class Session < ApplicationRecord
     session
   end
 
-  # Sum of tokens for non-compacted messages. Used for compaction threshold.
+  # Context size ≈ last message's input_tokens (includes all prior context)
+  # + its output_tokens. Summing input_tokens across all messages would
+  # double-count because each input_tokens value includes the full prior context.
   #
   # @return [Integer]
   def active_context_tokens
-    messages.where(compacted: [false, nil])
-            .sum("coalesce(input_tokens, 0) + coalesce(output_tokens, 0)")
+    last_msg = messages.where(compacted: [false, nil]).order(:created_at).last
+    return 0 unless last_msg
+
+    last_msg.input_tokens.to_i + last_msg.output_tokens.to_i
   end
 
   # Fast heuristic: estimate tokens from character count of active messages.
@@ -361,7 +372,7 @@ class Session < ApplicationRecord
   def self.model_record_for(model_id)
     RubyLLM::ModelRecord.find_or_create_by!(
       model_id:,
-      provider: SimpleChatService::PROVIDER.to_s
+      provider: AgentRuntime::DEFAULT_PROVIDER.to_s
     ) do |model|
       model.name = model_id
       model.capabilities = []
@@ -430,6 +441,7 @@ Drop-in replacement for `SimpleChatService`. Same constructor and `call()` inter
 # tools, memory injection, and budget enforcement.
 class AgentRuntime
   COMPACTION_THRESHOLD = 0.75
+  DEFAULT_PROVIDER = :openai_responses
 
   # @param session [Session]
   def initialize(session:)
@@ -450,7 +462,7 @@ class AgentRuntime
 
     context = ContextBuilder.new(session: @session, agent: @agent).build
 
-    provider = @agent.resolved_provider || SimpleChatService::PROVIDER
+    provider = @agent.resolved_provider || AgentRuntime::DEFAULT_PROVIDER
 
     @session
       .with_model(@agent.model_id, provider:)
@@ -698,9 +710,9 @@ class ArchiveStaleSessionsJob < ApplicationJob
     count = 0
 
     sessions.find_each do |session|
-      # Generate a final summary if the session has messages but no summary
+      # Generate a final summary asynchronously if needed
       if session.summary.blank? && session.messages.active.any?
-        CompactionService.new(session).compact!
+        CompactionJob.perform_later(session.id, workspace_id: session.workspace_id)
       end
 
       session.archive!

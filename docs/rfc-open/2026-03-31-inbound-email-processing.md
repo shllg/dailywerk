@@ -370,18 +370,29 @@ Reject unsigned or incorrectly signed requests with 403.
 - No executable attachments are processed (.exe, .bat, .sh, etc.)
 - Email content passed to agents is treated as untrusted user input
 
+**HTML sanitization**: Inbound HTML email bodies are sanitized before storage and before any frontend rendering using Rails' `ActionText::Content` sanitizer or `Loofah` with `:strip` scrubbing and a strict allowlist:
+
+- **Allowed tags**: `p`, `br`, `strong`, `em`, `ul`, `ol`, `li`, `a`, `blockquote`, `pre`, `code`, `h1`-`h6`, `table`, `tr`, `td`, `th`, `thead`, `tbody`
+- **Allowed attributes**: `href` (on `a` tags only, `https:` and `mailto:` schemes only)
+- **Stripped**: All `<script>`, `<style>`, `<iframe>`, `<object>`, `<embed>`, `<form>`, `<input>`, `on*` event attributes, `style` attributes, `data-*` attributes
+- **CSS**: All CSS is stripped (prevents CSS-based data exfiltration)
+
+The sanitized HTML is stored in `parsed_body`. The raw `html_body` is retained for debugging but never rendered in the frontend.
+
 ### Rate Limiting
 
 - Per-workspace: 100 emails/hour (configurable)
 - Per-sender: 20 emails/hour to a single workspace
 - Exceeding limits: email stored with `status: "rejected"`, `rejection_reason: "rate_limited"`
 
-### Token Security
+### Token Security and Rotation
 
-- `inbound_email_token` is cryptographically random (SecureRandom.alphanumeric, 12 chars with prefix)
-- Not derived from workspace_id
-- Regeneration invalidates old address immediately
-- Leaked tokens can be rotated without affecting other integrations
+- `inbound_email_token` is cryptographically random (`SecureRandom.alphanumeric(16)` with `dk_` prefix)
+- Not derived from workspace_id — prevents enumeration
+- **Rotation with grace period**: When a user regenerates their token, the old token remains valid for 24 hours (grace period) to allow in-flight forwarding rules to update. After the grace period, the old token is permanently invalidated.
+- **Sender allowlist is always enforced**: Even if a token leaks, only allowlisted senders can trigger agent processing. The fail-closed default (no allowlist entries = all blocked) ensures safety.
+- **Rate limiting per token**: 100 emails/hour per workspace, 20 emails/hour per sender. Exceeding limits results in `status: "rejected"` with `rejection_reason: "rate_limited"`.
+- **Monitoring**: Alert workspace owner if >50 rejected emails in 24 hours (possible token leak or spam targeting).
 
 ## Rollout
 

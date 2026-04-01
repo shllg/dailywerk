@@ -153,18 +153,18 @@ Finds or creates the right session for an inbound message:
 ```ruby
 # app/services/session_resolver.rb
 class SessionResolver
-  def self.resolve(user:, agent_slug:, channel_type:, external_id: nil, thread_id: nil)
+  def self.resolve(workspace:, agent_slug:, channel_type:, external_id: nil, thread_id: nil)
     channel = Channel.create_or_find_by!(
-      user: user, channel_type: channel_type, external_id: external_id
+      workspace: workspace, channel_type: channel_type, external_id: external_id
     )
-    agent = Agent.find_by!(slug: agent_slug, user: user, active: true)
+    agent = Agent.find_by!(slug: agent_slug, workspace: workspace, active: true)
 
     Session.create_or_find_by!(
       agent: agent, channel: channel, status: "active", thread_id: thread_id
     ) do |s|
-      s.user     = user
-      s.model_id = agent.model_id
-      s.provider = agent.provider
+      s.workspace = workspace
+      s.model_id  = agent.model_id
+      s.provider  = agent.provider
     end
   end
 end
@@ -215,13 +215,13 @@ User's Obsidian App (phone/desktop)
          │ (Obsidian Sync protocol)
    Obsidian Cloud
          │ (obsidian-headless sync --continuous)
-   DailyWerk Server: /data/vaults/{user_id}/   ← local checkout
+   DailyWerk Server: /data/workspaces/{workspace_id}/vaults/   ← local checkout
          │
          ├──▶ Agent reads/writes files here
          ├──▶ EmbeddingWorker indexes changes → pgvector
          │
          ▼ (VaultSyncWorker, every 5min + inotify)
-   Hetzner S3: vaults/{user_id}/   ← encrypted canonical store (SSE-C)
+   Hetzner S3: workspaces/{workspace_id}/vaults/   ← encrypted canonical store (SSE-C)
 ```
 
 **Obsidian Headless** (official CLI, released Feb 2026): Headless client for Obsidian Sync. Requires Node.js 22+. Supports bidirectional sync, pull-only, and mirror-remote modes. Runs continuous sync watching for changes. Enables server-side vault synchronization without the desktop app.
@@ -305,24 +305,38 @@ The `vault_chunks` table (see [01 §5.6](./01-platform-and-infrastructure.md#56-
 - **Semantic**: `1 - (embedding <=> query_embedding)` cosine similarity (HNSW index)
 - **Fusion**: Combined via Reciprocal Rank Fusion (RRF) — `score = Σ 1/(k + rank)` with k=60
 
-All queries scoped by `user_id` (RLS).
+All queries scoped by `workspace_id` (RLS).
 
 ```ruby
-# Hybrid search combining semantic + keyword via RRF
-def hybrid_search(user, query, limit: 5)
+# Hybrid search combining semantic + keyword via RRF in SQL
+def hybrid_search(workspace, query, limit: 5)
   embedding = RubyLLM.embed(query).vectors
 
-  semantic = user.vault_chunks
-    .nearest_neighbors(:embedding, embedding, distance: "cosine").limit(limit * 2)
-  fulltext = user.vault_chunks
-    .where("tsv @@ plainto_tsquery('english', ?)", query).limit(limit * 2)
-
-  rrf_scores = Hash.new(0.0)
-  semantic.each_with_index { |chunk, i| rrf_scores[chunk.id] += 1.0 / (60 + i) }
-  fulltext.each_with_index { |chunk, i| rrf_scores[chunk.id] += 1.0 / (60 + i) }
-
-  chunk_ids = rrf_scores.sort_by { |_, s| -s }.first(limit).map(&:first)
-  VaultChunk.where(id: chunk_ids).index_by(&:id).values_at(*chunk_ids).compact
+  VaultChunk.find_by_sql([<<~SQL, { embedding: embedding, query: query, workspace_id: workspace.id, k: 60, limit: limit }])
+    WITH semantic AS (
+      SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> :embedding) AS rank
+      FROM vault_chunks
+      WHERE workspace_id = :workspace_id
+      ORDER BY embedding <=> :embedding
+      LIMIT :limit * 3
+    ),
+    fulltext AS (
+      SELECT id, ROW_NUMBER() OVER (ORDER BY ts_rank(tsv, plainto_tsquery('english', :query)) DESC) AS rank
+      FROM vault_chunks
+      WHERE workspace_id = :workspace_id AND tsv @@ plainto_tsquery('english', :query)
+      LIMIT :limit * 3
+    ),
+    rrf AS (
+      SELECT COALESCE(s.id, f.id) AS id,
+             COALESCE(1.0 / (:k + s.rank), 0) + COALESCE(1.0 / (:k + f.rank), 0) AS score
+      FROM semantic s
+      FULL OUTER JOIN fulltext f ON s.id = f.id
+    )
+    SELECT vault_chunks.* FROM rrf
+    JOIN vault_chunks ON vault_chunks.id = rrf.id
+    ORDER BY rrf.score DESC
+    LIMIT :limit
+  SQL
 end
 ```
 
@@ -332,7 +346,7 @@ File change (inotify from local checkout or agent write) → EmbeddingWorker: re
 
 ### 7.4 Scaling Path
 
-pgvector handles ~1M vectors with HNSW. Per-user vault = <50k chunks typically. At 10k+ users: partition `vault_chunks` by `user_id` → OpenSearch with filtered aliases → dedicated vector DB.
+pgvector handles ~1M vectors with HNSW. Per-workspace vault = <50k chunks typically. At 10k+ users: partition `vault_chunks` by `workspace_id` → OpenSearch with filtered aliases → dedicated vector DB.
 
 ---
 

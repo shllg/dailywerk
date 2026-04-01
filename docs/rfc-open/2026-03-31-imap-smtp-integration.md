@@ -316,10 +316,16 @@ Non-deterministic `ActiveRecord::Encryption`. Credentials are decrypted only dur
 
 ### SSRF Prevention
 
-IMAP/SMTP hosts are validated:
-- No connections to private IP ranges (10.x, 172.16-31.x, 192.168.x, 127.x) except `127.0.0.1` for ProtonMail Bridge
-- No connections to DailyWerk's own infrastructure IPs
-- Port numbers restricted to known email ports (993, 143, 587, 465, 25) plus ProtonMail Bridge ports
+User-provided IMAP/SMTP hostnames are validated before connection:
+
+1. **DNS resolution**: Resolve hostname to IP address(es) before connecting
+2. **IP blocklist**: Reject private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), loopback (`127.0.0.0/8`), link-local (`169.254.0.0/16`), and cloud metadata endpoints (`169.254.169.254`)
+3. **Exception**: `127.0.0.1` is allowed ONLY for ProtonMail Bridge (localhost IMAP/SMTP proxy), gated by `provider_preset: "protonmail"`
+4. **Port restriction**: Only known email ports allowed: 993 (IMAPS), 143 (IMAP), 587 (SMTP submission), 465 (SMTPS), 25 (SMTP). Plus ProtonMail Bridge ports 1143/1025.
+5. **DNS rebinding protection**: Connect to the resolved IP directly (not the hostname), preventing DNS rebinding attacks where a hostname resolves to a public IP during validation but a private IP during connection.
+6. **No internal infrastructure**: Reject connections to DailyWerk's own infrastructure IPs.
+
+This validation runs both during the initial connection test (`POST /api/v1/email_integrations/:id/test`) and on every `EmailPollJob` connection attempt. A hostname that passes initial validation but later resolves to a blocked IP is caught on subsequent polls and the integration is marked `connection_failed`.
 
 ### Credential Isolation
 

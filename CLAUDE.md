@@ -69,6 +69,7 @@ bundle exec bundler-audit check --update  # Dependency audit
 - `docs/rfc-open/2026-03-29-ai-tooling-phase2.md` — Deferred agent/skill/hook config
 - `docs/rfc-done/2026-03-29-simple-chat-conversation.md` — First chat conversation (done)
 - `docs/rfc-done/2026-03-30-workspace-isolation.md` — Workspace isolation (done)
+- `docs/rfc-done/2026-03-31-agent-configuration.md` — Agent config, PromptBuilder, settings drawer (done)
 
 ## Claude Code Configuration
 

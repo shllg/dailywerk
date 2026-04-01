@@ -117,7 +117,7 @@ The `VaultLinkExtractor` must also handle escaped pipes when parsing wikilinks:
 
 ```ruby
 # In VaultLinkExtractor, the regex must account for escaped pipes:
-WIKILINK_REGEX = /(?<!!)\[\[([^\]|\\]+(?:\\.[^\]|\\]*)*)(?:(?:\||\\|)([^\]]*))?\]\]/
+WIKILINK_REGEX = /(?<!!)\[\[([^\]\|\\]+(?:\\.[^\]\|\\]*)*)(?:(?:\||\\\|)([^\]]*))?\]\]/
 ```
 
 This applies to embeds with aliases too (`![[image.png\|300]]` for resized images inside tables).
@@ -979,7 +979,15 @@ class VaultS3Service
 
   # Prevents S3 prefix traversal via ../ in the relative path.
   def sanitize_s3_key(relative_path)
-    clean = relative_path.gsub(%r{\.\./}, "").gsub(/\A/+/, "")
+    clean = relative_path.gsub(%r{\.\./}, "").gsub(%r{\A/+}, "")
+
+    # Loop-based sanitization to catch nested traversal attempts like "....//....//"
+    loop do
+      cleaned = clean.gsub(%r{\.\./}, "").gsub(%r{\A/+}, "")
+      break if cleaned == clean
+      clean = cleaned
+    end
+
     raise ArgumentError, "Invalid S3 key: #{relative_path}" if clean.include?("..")
     clean
   end
@@ -1104,9 +1112,9 @@ end
 # app/services/vault_link_extractor.rb
 # Parses wikilinks, embeds, and tags from markdown to build the backlink graph.
 class VaultLinkExtractor
-  # Wikilink regex handles both normal pipes and escaped pipes (\|) for table contexts.
-  # [[target]], [[target|alias]], [[target\|alias]] (escaped pipe inside tables)
-  WIKILINK_REGEX = /(?<!!)\[\[([^\]|\\]+(?:\\.[^\]|\\]*)*)(?:(?:\||\\|)[^\]]*)?\]\]/
+  # Matches [[target]] and [[target|alias]] and [[target\|alias]] (escaped pipe in tables)
+  # The \\\| variant handles the Obsidian convention of escaping pipes inside markdown tables
+  WIKILINK_REGEX = /(?<!!)\[\[([^\]\|\\]+(?:\\.[^\]\|\\]*)*)(?:(?:\||\\\|)([^\]]*))?\]\]/
   EMBED_REGEX    = /!\[\[([^\]|\\]+(?:\\.[^\]|\\]*)*)(?:(?:\||\\|)[^\]]*)?\]\]/
   TAG_REGEX      = /(?:^|\s)#([a-zA-Z][a-zA-Z0-9_\/-]+)/
 
@@ -1331,7 +1339,7 @@ class VaultFileChangedJob < ApplicationJob
         heading_path: chunk_data[:heading_path],
         metadata: chunk_data[:metadata] || {}
       )
-      GenerateEmbeddingJob.perform_later("VaultChunk", chunk.id, user_id: vault.workspace.id)
+      GenerateEmbeddingJob.perform_later("VaultChunk", chunk.id, workspace_id: vault.workspace_id)
     end
   end
 
@@ -1493,7 +1501,7 @@ class VaultReindexStaleJob < ApplicationJob
     Current.skip_workspace_scoping do
       # Files indexed but with chunks missing embeddings
       VaultChunk.where(embedding: nil).find_each do |chunk|
-        GenerateEmbeddingJob.perform_later("VaultChunk", chunk.id, user_id: chunk.workspace_id)
+        GenerateEmbeddingJob.perform_later("VaultChunk", chunk.id, workspace_id: chunk.workspace_id)
       end
 
       # Files never indexed
@@ -1717,7 +1725,7 @@ class VaultStructureAnalysisJob < ApplicationJob
 end
 ```
 
-### 7.6 GoodJob Cron Additions
+### 7.8 GoodJob Cron Additions
 
 ```ruby
 # Add to config/initializers/good_job.rb cron hash:
@@ -1738,7 +1746,7 @@ vault_reconciliation: {
 }
 ```
 
-### 7.6 Update GenerateEmbeddingJob
+### 7.9 Update GenerateEmbeddingJob
 
 Add `"VaultChunk"` to `EMBEDDABLE_MODELS` in the existing `GenerateEmbeddingJob` ([PRD 04 SS8](../prd/04-billing-and-operations.md#8-goodjob-configuration)).
 
@@ -1802,6 +1810,13 @@ class VaultWatcher
   # instead of separate delete + create.
   def handle_event(vault, event, relative)
     flags = event.flags
+
+    # Dynamically watch newly created directories
+    if event.flags.include?(:create) && event.flags.include?(:isdir)
+      new_dir = File.join(watched_path, event.name)
+      add_watch(new_dir)
+      Rails.logger.info "[VaultWatcher] Added watch for new directory: #{new_dir}"
+    end
 
     if flags.include?(:moved_from)
       # Store the source path, keyed by inotify cookie. The matching
@@ -1910,6 +1925,8 @@ Production servers must set `fs.inotify.max_user_watches = 524288` in `/etc/sysc
 
 Monitoring: track inotify watch count via `cat /proc/sys/fs/inotify/max_user_watches` and alert in Grafana if usage exceeds 80%.
 
+**New directory handling**: When a new subdirectory is created (detected via `:create` + `:isdir` inotify flags), the watcher dynamically adds a watch for the new directory. This ensures files created in new subdirectories are detected immediately, rather than waiting for the next `VaultReconciliationJob` run (every 6 hours). This is critical for Obsidian users who create new folders in their vault.
+
 ---
 
 ## 9. Agent Integration — VaultTool
@@ -1940,7 +1957,7 @@ class VaultTool < RubyLLM::Tool
     @session = session
   end
 
-  def execute(action:, path: nil, content: nil, query: nil, vault_id: nil)
+  def execute(action:, path: nil, content: nil, query: nil, vault_id: nil, section: nil)
     vault = resolve_vault(vault_id)
     return { error: "No vault found" } unless vault
     return { error: "Vault is suspended — size limit exceeded" } if vault.status == "suspended" && action == "write"

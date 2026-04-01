@@ -65,7 +65,7 @@ When versioning is disabled, `VaultVersioningService.create_version` is a no-op.
 ## 1. Prerequisites
 
 - [RFC: Vault Filesystem](./2026-03-31-vault-filesystem.md) implemented (vaults, vault_files, VaultS3Service, VaultFileChangedJob)
-- `with_advisory_lock` gem available (already used in existing codebase patterns)
+- GoodJob concurrency control configured on VaultFileChangedJob (perform_limit: 1 per file key)
 
 ---
 
@@ -213,31 +213,37 @@ class VaultVersioningService
   #
   # @param vault_file [VaultFile] the file about to be overwritten
   # @param change_source [String] what triggered the change (agent, obsidian_sync, api)
+  # Concurrency: VaultFileChangedJob uses GoodJob perform_limit: 1 per file,
+  # preventing concurrent version creation. No advisory locks needed
+  # (advisory locks are unsafe under Falcon's fiber model).
   def create_version(vault_file, change_source: "system")
-    vault_file.with_advisory_lock("vault_version:#{vault_file.id}") do
-      # No previous content to version (new file)
-      return if vault_file.content_hash.blank?
+    # No previous content to version (new file)
+    return if vault_file.content_hash.blank?
 
-      # Content-hash dedup: skip if this exact content is already versioned
-      return if vault_file.versions.exists?(content_hash: vault_file.content_hash)
+    # Content-hash dedup: skip if this exact content is already versioned
+    return if vault_file.versions.exists?(content_hash: vault_file.content_hash)
 
-      version_number = (vault_file.versions.maximum(:version_number) || 0) + 1
-      version_key = build_version_key(vault_file, version_number)
+    version_number = (vault_file.versions.maximum(:version_number) || 0) + 1
+    version_key = build_version_key(vault_file, version_number)
 
-      # Transaction ensures DB and S3 stay in sync:
-      # if S3 copy fails, DB insert rolls back.
-      ActiveRecord::Base.transaction do
-        vault_file.versions.create!(
-          workspace: @vault.workspace,
-          content_hash: vault_file.content_hash,
-          size_bytes: vault_file.size_bytes || 0,
-          s3_version_key: version_key,
-          version_number: version_number,
-          change_source: change_source
-        )
+    # Create DB record first, then sync to S3.
+    # S3 failure leaves an orphaned DB record (cleaned by VaultVersionCleanupJob).
+    # This is safer than S3-inside-transaction which risks DB connection pool
+    # exhaustion under Falcon's fiber concurrency model.
+    version = vault_file.versions.create!(
+      workspace: @vault.workspace,
+      content_hash: vault_file.content_hash,
+      size_bytes: vault_file.size_bytes || 0,
+      s3_version_key: version_key,
+      version_number: version_number,
+      change_source: change_source
+    )
 
-        @s3.copy_to_version(vault_file.path, version_key)
-      end
+    begin
+      @s3.copy_to_version(vault_file.path, version_key)
+    rescue => e
+      Rails.logger.error "[VaultVersioning] S3 copy failed for version #{version.id}: #{e.message}"
+      # DB record exists but S3 object doesn't — VaultVersionCleanupJob handles orphans
     end
   end
 
@@ -268,8 +274,8 @@ end
 
 **Design decisions**:
 
-1. **Advisory lock per file**: Prevents concurrent version creation for the same file (e.g., rapid agent edits triggering overlapping jobs).
-2. **DB transaction wrapping S3 call**: If S3 `copy_to_version` fails, the DB insert rolls back — no orphaned version records. If the DB insert fails after S3 succeeds, there's an orphaned S3 object, but this is acceptable (cleaned up by retention).
+1. **GoodJob concurrency control**: `VaultFileChangedJob` uses `perform_limit: 1` per file key, preventing concurrent version creation. Advisory locks are avoided because they are unsafe under Falcon's fiber model.
+2. **DB record first, then S3**: The DB record is created outside a transaction, then S3 is called separately. If S3 fails, the orphaned DB record is cleaned by `VaultVersionCleanupJob`. This avoids holding a DB connection open during S3 I/O, which would risk connection pool exhaustion under Falcon's fiber concurrency.
 3. **Content-hash deduplication**: Identical content is not versioned twice. Saves S3 storage and prevents noise in version history from no-op saves.
 
 ### 4.2 VaultSnapshotService — Point-in-Time Snapshots
@@ -308,10 +314,6 @@ class VaultSnapshotService
     end
 
     manifest_key = "workspaces/#{@vault.workspace_id}/snapshots/#{@vault.slug}/#{snapshot.id}.json"
-    @s3.put_object(manifest_key.delete_prefix("workspaces/#{@vault.workspace_id}/vaults/#{@vault.slug}/"),
-                   manifest.to_json)
-
-    # Use put_by_key to write to arbitrary S3 key (not under vault prefix)
     @s3.instance_variable_get(:@client).put_object(
       bucket: Rails.application.config.x.vault_s3_bucket,
       key: manifest_key,
@@ -895,7 +897,7 @@ The admin Grafana dashboard (accessible via Tailscale only, see [PRD 06 §10](..
 10. VaultVersionCleanupJob removes versions older than 30 days
 11. VaultSnapshotJob creates daily snapshots for all active vaults
 12. Workspace isolation: versions/snapshots with wrong `app.current_workspace_id` return no rows
-13. Advisory locks prevent concurrent version creation for the same file
+13. GoodJob concurrency control prevents concurrent version creation for the same file
 14. `bundle exec rails test` passes
 15. `bundle exec rubocop` passes
 16. `bundle exec brakeman --quiet` shows no critical issues
