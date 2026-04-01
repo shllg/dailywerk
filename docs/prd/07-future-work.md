@@ -121,7 +121,7 @@ depends_on:
 | Envelope encryption with KMS | PRD 01 §4.3 | Rails master key → per-workspace DEK → KMS-managed KEK. Prevents data access from DB compromise alone. |
 | Webhook idempotency | PRD 02 §8.3 | Bridge webhooks need idempotency keys (dedup by `event_id` or content hash). |
 | Prompt injection hardening | PRD 03 §2, Audit 2026-03-31 | Output filtering, sandboxed prompt placement, tool-level auth enforcement. See `/prompt-injection-review` command. |
-| Authorization framework | Audit 2026-03-31 | Lightweight authorization (cancancan or action_policy) for debug endpoints, admin features, and future billing. |
+| Authorization framework | Audit 2026-03-31 | Lightweight authorization (cancancan or action_policy) for debug endpoints, admin features, and future billing. Admin interface now has its own PRD ([08-admin-interface.md](./08-admin-interface.md)). |
 | Dependency audit CI | Audit 2026-03-31 | Add `bundler-audit` and `brakeman` to CI pipeline. Currently manual. |
 
 ---
@@ -133,7 +133,7 @@ depends_on:
 | Component patterns codification | PRD 01 §8.4 | Vite + React + TypeScript + Tailwind + DaisyUI patterns to be codified after more features ship. |
 | Agent management dashboard | PRD 03 §2 | Create/edit/delete agents, configure tools, set personality. |
 | Usage/billing dashboard | PRD 04 §4 | Per-workspace token usage, cost breakdown by model, credit balance. Minimal stats in [RFC: Usage Tracking](../rfc-open/2026-03-31-usage-tracking-provider-cost.md); full dashboard deferred. |
-| GoodJob admin dashboard access | PRD 04 §8 | Mount behind admin auth. |
+| GoodJob admin dashboard access | PRD 04 §8 | Mount behind admin auth. Covered in [08-admin-interface.md §2.1](./08-admin-interface.md#21-goodjob-dashboard-authentication). |
 | Vault file browser | RFC: Vault Filesystem | Tree view, file preview, upload/download, vault guide editor. |
 | Settings pages | RFC: Agent Config | Agent configuration UI, integration management, sync status. |
 
