@@ -15,6 +15,7 @@ implemented_by:
   - rfc/2026-03-31-agent-session-management
   - rfc/2026-03-31-debug-tools
   - rfc/2026-03-31-voice-message-processing
+  - rfc/2026-04-01-web-search-tool
 ---
 
 # DailyWerk — Agentic System
@@ -24,7 +25,7 @@ implemented_by:
 > For channel adapters and vault sync: see [02-integrations-and-channels.md](./02-integrations-and-channels.md).
 > For BYOK, MCP, cost tracking, and GoodJob config: see [04-billing-and-operations.md](./04-billing-and-operations.md).
 
-**Implementation status:** [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) implements the first slice — simple chat with a single agent (no tools, no memory, no handoffs). [RFC Agent Configuration](../rfc-done/2026-03-31-agent-configuration.md) (done) adds soul/identity/thinking config, provider selection, `PromptBuilder` service, `AgentDefaults` with reset-to-defaults, `AgentsController` REST API (show/update/reset), and a frontend settings drawer. [RFC Session Management](../rfc-open/2026-03-31-agent-session-management.md) adds compaction, context building, and session archival. [RFC Debug Tools](../rfc-open/2026-03-31-debug-tools.md) adds developer-mode debugging UI. Sections below describe the full target architecture.
+**Implementation status:** [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) implements the first slice — simple chat with a single agent (no tools, no memory, no handoffs). [RFC Agent Configuration](../rfc-done/2026-03-31-agent-configuration.md) (done) adds soul/identity/thinking config, provider selection, `PromptBuilder` service, `AgentDefaults` with reset-to-defaults, `AgentsController` REST API (show/update/reset), and a frontend settings drawer. [RFC Session Management](../rfc-open/2026-03-31-agent-session-management.md) adds compaction, context building, and session archival. [RFC Debug Tools](../rfc-open/2026-03-31-debug-tools.md) adds developer-mode debugging UI. [RFC Web Search Tool](../rfc-open/2026-04-01-web-search-tool.md) establishes the ToolRegistry foundation and adds Brave Search as the first agent tool (default-on, deactivatable). Sections below describe the full target architecture.
 
 ---
 

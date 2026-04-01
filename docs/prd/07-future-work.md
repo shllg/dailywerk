@@ -62,6 +62,7 @@ depends_on:
 | Parallel agent execution | PRD 03 §9 | `ParallelAgentExecutor` with `Async::Semaphore` for fan-out to multiple agents. |
 | `instructions_path` ERB templates | RFC: Agent Config §5 | Deferred — ERB is full Ruby execution, security risk. Consider Liquid if needed. |
 | Agent CRUD REST API | PRD 03 §2 | `Api::V1::AgentsController` for dashboard agent management. |
+| Exa neural search provider | RFC: Web Search Tool §Context | Alternative to Brave Search with semantic/neural search via own embeddings index (~$5/1K queries). Could complement Brave for research-heavy agents. Implement as a `SearchProvider` behind the existing interface. |
 | OpenAI Responses API server-side compaction | RFC: Agent Session Management | Uses `previous_response_id` for efficient context management. |
 
 ---
