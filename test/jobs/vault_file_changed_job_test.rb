@@ -68,4 +68,49 @@ class VaultFileChangedJobTest < ActiveSupport::TestCase
     end
   end
   # rubocop:enable Minitest/MultipleAssertions
+
+  # rubocop:disable Minitest/MultipleAssertions
+  test "moves files with the watcher event name and enqueues link repair with the vault id" do
+    file_service = VaultFileService.new(vault: @vault)
+    original_content = <<~MARKDOWN
+      # Original
+
+      #{'M' * 140}
+    MARKDOWN
+
+    file_service.write("old-note.md", original_content)
+    VaultFileChangedJob.perform_now(@vault.id, "old-note.md", "updated", workspace_id: @vault.workspace_id)
+    FileUtils.mv(
+      file_service.resolve_safe_path("old-note.md"),
+      file_service.resolve_safe_path("new-note.md")
+    )
+
+    assert_enqueued_with(
+      job: VaultLinkRepairJob,
+      args: [ @vault.id, "old-note.md", "new-note.md", { workspace_id: @vault.workspace_id } ]
+    ) do
+      VaultFileChangedJob.perform_now(@vault.id, "new-note.md", "move", workspace_id: @vault.workspace_id, old_path: "old-note.md")
+    end
+
+    with_current_workspace(@workspace, user: @user) do
+      moved_file = @vault.vault_files.find_by!(path: "new-note.md")
+
+      assert_nil @vault.vault_files.find_by(path: "old-note.md")
+      assert_equal [ "new-note.md" ], moved_file.vault_chunks.pluck(:file_path).uniq
+    end
+  end
+  # rubocop:enable Minitest/MultipleAssertions
+
+  test "deletes files with the watcher event name" do
+    file_service = VaultFileService.new(vault: @vault)
+    file_service.write("delete-me.md", "# Delete Me\n\n#{'D' * 140}")
+    VaultFileChangedJob.perform_now(@vault.id, "delete-me.md", "updated", workspace_id: @vault.workspace_id)
+    file_service.delete("delete-me.md")
+
+    VaultFileChangedJob.perform_now(@vault.id, "delete-me.md", "delete", workspace_id: @vault.workspace_id)
+
+    with_current_workspace(@workspace, user: @user) do
+      assert_nil @vault.vault_files.find_by(path: "delete-me.md")
+    end
+  end
 end

@@ -69,6 +69,11 @@ Rails.application.configure do
   # the I18n.default_locale when a translation cannot be found).
   config.i18n.fallbacks = true
 
+  config.x.vault_s3_bucket = ENV["VAULT_S3_BUCKET"]
+  config.x.vault_s3_endpoint = ENV["VAULT_S3_ENDPOINT"]
+  config.x.vault_s3_region = ENV.fetch("VAULT_S3_REGION", "fsn1")
+  config.x.vault_local_base = ENV.fetch("VAULT_LOCAL_BASE", "/data/workspaces")
+
   # Do not dump schema after migrations.
   config.active_record.dump_schema_after_migration = false
 

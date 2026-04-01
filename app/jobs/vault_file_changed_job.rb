@@ -26,9 +26,9 @@ class VaultFileChangedJob < ApplicationJob
     vault = Vault.find(vault_id)
 
     case event_type.to_s
-    when "deleted"
+    when "delete", "deleted"
       delete_file(vault, relative_path)
-    when "moved"
+    when "move", "moved"
       move_file(vault, old_path: old_path, new_path: relative_path)
     else
       process_file(vault, relative_path)
@@ -101,7 +101,7 @@ class VaultFileChangedJob < ApplicationJob
     record.update!(path: new_path)
     record.vault_chunks.update_all(file_path: new_path)
     process_file(vault, new_path)
-    VaultLinkRepairJob.perform_later(record.id, old_path, workspace_id: vault.workspace_id)
+    VaultLinkRepairJob.perform_later(vault.id, old_path, new_path, workspace_id: vault.workspace_id)
   end
 
   # @param record [VaultFile]

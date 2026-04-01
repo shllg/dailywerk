@@ -2,14 +2,15 @@
 type: rfc
 title: Vault Filesystem — Obsidian-Compatible Knowledge Store
 created: 2026-03-31
-updated: 2026-03-31
-status: draft
+updated: 2026-04-01
+status: done
 implements:
   - prd/01-platform-and-infrastructure
   - prd/02-integrations-and-channels
   - prd/03-agentic-system
 depends_on:
   - rfc/2026-03-30-workspace-isolation
+implemented_by: []
 phase: 2
 ---
 
@@ -31,13 +32,13 @@ This RFC implements the **foundation**: the workspace-scoped vault filesystem wi
 - Wikilink and embed parser for the backlink graph
 - inotify-based file watcher (standalone process)
 - Background jobs for indexing and S3 sync
-- VaultTool for agent interaction
+- VaultTool implementation, with registry wiring deferred to the future tool system
 - Local dev (RustFS) and production (Hetzner Object Storage) configuration
 
 ### What This RFC Does NOT Cover (see companion RFCs)
 
-- Obsidian Sync integration via obsidian-headless ([RFC: Obsidian Sync](./2026-03-31-obsidian-sync.md))
-- File versioning, snapshots, backup/restore ([RFC: Vault Backup & Versioning](./2026-03-31-vault-backup-versioning.md))
+- Obsidian Sync integration via obsidian-headless ([RFC: Obsidian Sync](../rfc-open/2026-03-31-obsidian-sync.md))
+- File versioning, snapshots, backup/restore ([RFC: Vault Backup & Versioning](../rfc-open/2026-03-31-vault-backup-versioning.md))
 - Vault dashboard/file browser in the frontend (future RFC)
 - Multi-vault pricing and workspace plan limits (future RFC)
 
@@ -337,7 +338,7 @@ Agent: [calls VaultTool action: "update_guide" with the proposed changes]
 1. **Confirmation required**: The agent always shows the proposed change and asks for confirmation before modifying the vault guide. This is the user's knowledge system — no silent changes.
 2. **Atomic updates**: Each conversational change results in a single, well-defined update to the vault guide. The agent does not rewrite the entire guide.
 3. **Separation of concerns**: The vault guide handles *where* and *what format*. Scheduled behaviors (crons, reminders) are a separate system that references the vault guide for placement decisions.
-4. **Versioned**: The vault guide is a vault file — it gets versioned like any other file (see [RFC: Vault Backup & Versioning](./2026-03-31-vault-backup-versioning.md)). Users can restore previous guide versions if a change was wrong.
+4. **Versioned**: The vault guide is a vault file — it gets versioned like any other file (see [RFC: Vault Backup & Versioning](../rfc-open/2026-03-31-vault-backup-versioning.md)). Users can restore previous guide versions if a change was wrong.
 
 ### 2.5 Agent Prompt Requirements for Vault Writing
 
@@ -392,7 +393,7 @@ Each vault gets a unique AES-256 key at creation time:
 3. Every S3 PUT/GET includes SSE-C headers (`sse_customer_algorithm: "AES256"`, `sse_customer_key`, `sse_customer_key_md5`)
 4. Hetzner encrypts the object, then discards the key — cross-workspace reads are impossible even if the bucket is compromised
 
-**Key dependency chain**: Rails master key decrypts `encryption_key_enc` decrypts S3 objects. Master key loss = total vault data loss. See [RFC: Vault Backup & Versioning](./2026-03-31-vault-backup-versioning.md) for key recovery procedures.
+**Key dependency chain**: Rails master key decrypts `encryption_key_enc` decrypts S3 objects. Master key loss = total vault data loss. See [RFC: Vault Backup & Versioning](../rfc-open/2026-03-31-vault-backup-versioning.md) for key recovery procedures.
 
 ### 3.3 Vault Size Limits
 
@@ -2090,10 +2091,10 @@ config.x.vault_s3_region = "us-east-1"
 config.x.vault_local_base = Rails.root.join("tmp/workspaces").to_s
 
 # config/environments/production.rb
-config.x.vault_s3_bucket = "dailywerk-vaults"
-config.x.vault_s3_endpoint = "https://fsn1.your-objectstorage.com"
-config.x.vault_s3_region = "fsn1"
-config.x.vault_local_base = "/data/workspaces"
+config.x.vault_s3_bucket = ENV["VAULT_S3_BUCKET"]
+config.x.vault_s3_endpoint = ENV["VAULT_S3_ENDPOINT"]
+config.x.vault_s3_region = ENV.fetch("VAULT_S3_REGION", "fsn1")
+config.x.vault_local_base = ENV.fetch("VAULT_LOCAL_BASE", "/data/workspaces")
 ```
 
 ```ruby
@@ -2156,7 +2157,7 @@ gem "marcel", "~> 1.0"        # MIME type detection
 ### Phase 5: Agent Integration
 
 1. Create VaultTool
-2. Wire into ToolRegistry (when tool system ships)
+2. Wire into ToolRegistry in future tool-system work
 3. **Verify**: Agent can read, write, search, and navigate backlinks
 
 ---
@@ -2165,11 +2166,12 @@ gem "marcel", "~> 1.0"        # MIME type detection
 
 | Limitation             | Impact                                       | Future Work                                                         |
 | ---------------------- | -------------------------------------------- | ------------------------------------------------------------------- |
-| No file versioning     | Overwrites lose previous content             | [RFC: Backup & Versioning](./2026-03-31-vault-backup-versioning.md) |
-| No Obsidian Sync       | User must manage files via agent or API      | [RFC: Obsidian Sync](./2026-03-31-obsidian-sync.md)                 |
+| No file versioning     | Overwrites lose previous content             | [RFC: Backup & Versioning](../rfc-open/2026-03-31-vault-backup-versioning.md) |
+| No Obsidian Sync       | User must manage files via agent or API      | [RFC: Obsidian Sync](../rfc-open/2026-03-31-obsidian-sync.md)                 |
 | No PDF text extraction | PDFs stored but not searchable by content    | Future: PDF-to-text pipeline                                        |
 | No canvas file parsing | .canvas files stored but links not extracted | Future: JSON canvas parser                                          |
-| No vault dashboard UI  | Files managed via agent tool only            | Future: Frontend file browser RFC                                   |
+| No tool registry wiring | Agents cannot invoke `VaultTool` yet         | Future: tool system RFC                                             |
+| No vault dashboard UI  | No direct UI for browsing or editing files   | Future: Frontend file browser RFC                                   |
 | 2 GB vault size limit  | Restrictive for heavy users                  | Increase after disk monitoring validates capacity                   |
 | Single-language FTS    | tsvector uses 'english' config               | Future: language detection per file                                 |
 

@@ -33,7 +33,7 @@ Vault data is the most valuable asset in DailyWerk — user's personal knowledge
 
 ### What This RFC Does NOT Cover
 
-- Vault filesystem, storage, indexing — see [RFC: Vault Filesystem](./2026-03-31-vault-filesystem.md)
+- Vault filesystem, storage, indexing — see [RFC: Vault Filesystem](../rfc-done/2026-03-31-vault-filesystem.md)
 - Obsidian Sync — see [RFC: Obsidian Sync](./2026-03-31-obsidian-sync.md)
 - User-facing undo/redo in the dashboard (future — uses version + snapshot restore APIs)
 - Cross-vault deduplication / content-addressable storage (deferred)
@@ -64,7 +64,7 @@ When versioning is disabled, `VaultVersioningService.create_version` is a no-op.
 
 ## 1. Prerequisites
 
-- [RFC: Vault Filesystem](./2026-03-31-vault-filesystem.md) implemented (vaults, vault_files, VaultS3Service, VaultFileChangedJob)
+- [RFC: Vault Filesystem](../rfc-done/2026-03-31-vault-filesystem.md) implemented (vaults, vault_files, VaultS3Service, VaultFileChangedJob)
 - GoodJob concurrency control configured on VaultFileChangedJob (perform_limit: 1 per file key)
 
 ---
@@ -388,7 +388,7 @@ end
 
 ## 5. Integration with VaultFileChangedJob
 
-The versioning service hooks into the existing `VaultFileChangedJob` (from [RFC: Vault Filesystem](./2026-03-31-vault-filesystem.md)). Before processing a "modify" event, the job creates a version of the current file state.
+The versioning service hooks into the existing `VaultFileChangedJob` (from [RFC: Vault Filesystem](../rfc-done/2026-03-31-vault-filesystem.md)). Before processing a "modify" event, the job creates a version of the current file state.
 
 Add to `VaultFileChangedJob#process_file`, before the file is updated:
 

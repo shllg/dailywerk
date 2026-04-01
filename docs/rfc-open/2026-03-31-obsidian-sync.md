@@ -32,14 +32,14 @@ The goal: a user's Obsidian vault on their phone/desktop stays in sync with the 
 
 ### What This RFC Does NOT Cover
 
-- Vault filesystem, storage, indexing, search — see [RFC: Vault Filesystem](./2026-03-31-vault-filesystem.md)
+- Vault filesystem, storage, indexing, search — see [RFC: Vault Filesystem](../rfc-done/2026-03-31-vault-filesystem.md)
 - File versioning and backup — see [RFC: Vault Backup & Versioning](./2026-03-31-vault-backup-versioning.md)
 - Obsidian plugin development (no custom Obsidian plugin needed)
 - Shared vaults (multi-user Obsidian Sync) — future RFC
 
 ### Prerequisites
 
-- [RFC: Vault Filesystem](./2026-03-31-vault-filesystem.md) implemented (vaults, vault_files, indexing pipeline, file watcher)
+- [RFC: Vault Filesystem](../rfc-done/2026-03-31-vault-filesystem.md) implemented (vaults, vault_files, indexing pipeline, file watcher)
 - Node.js 22+ available (Docker container in dev, host or sidecar in production)
 - `obsidian-headless` npm package installed globally or in a known path
 
@@ -212,7 +212,7 @@ When a user enables Obsidian Sync for a vault:
    c. `ob sync-setup --vault "VaultName"` to connect the local directory
    d. `ob sync` (one-time) for initial pull
 4. Wait for initial sync to complete
-5. `VaultStructureAnalysisJob` analyzes the existing vault structure and generates `_dailywerk/vault-guide.md` if none exists (see [RFC: Vault Filesystem §2.3](./2026-03-31-vault-filesystem.md))
+5. `VaultStructureAnalysisJob` analyzes the existing vault structure and generates `_dailywerk/vault-guide.md` if none exists (see [RFC: Vault Filesystem §2.3](../rfc-done/2026-03-31-vault-filesystem.md))
 6. `VaultFullReindexJob` processes all files (bulk indexing)
 7. `ob sync --continuous` starts as a long-running process
 8. VaultWatcher (from RFC: Vault Filesystem) handles ongoing change detection
