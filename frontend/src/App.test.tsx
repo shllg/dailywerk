@@ -78,6 +78,7 @@ describe('App', () => {
     render(<App />)
 
     expect(screen.getByText('Personal')).toBeInTheDocument()
+    expect(screen.getByText('Gateways')).toBeInTheDocument()
 
     await waitFor(() => {
       expect(screen.getByText('How can I help?')).toBeInTheDocument()

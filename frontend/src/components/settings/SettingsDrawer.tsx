@@ -73,6 +73,24 @@ export function SettingsDrawer({
     }
   }, [agentId, isOpen])
 
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isOpen, onClose])
+
   async function handleSave(updates: AgentConfigUpdate) {
     if (!agentId) return
 
@@ -109,15 +127,20 @@ export function SettingsDrawer({
     }
   }
 
+  if (!isOpen) {
+    return null
+  }
+
   return (
-    <div className="drawer-side z-50">
-      <label
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <button
+        type="button"
         aria-label="Close settings"
-        className="drawer-overlay"
+        className="absolute inset-0 bg-slate-950/75 backdrop-blur-sm"
         onClick={onClose}
       />
 
-      <aside className="min-h-full w-full max-w-xl border-l border-white/10 bg-[#061120] text-white shadow-2xl shadow-slate-950/60 backdrop-blur-xl">
+      <aside className="relative min-h-full w-full max-w-xl border-l border-white/10 bg-[#061120] text-white shadow-2xl shadow-slate-950/60 backdrop-blur-xl">
         <div className="flex h-full flex-col px-5 pb-5 pt-4 sm:px-6">
           <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
             <div>

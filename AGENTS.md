@@ -66,6 +66,15 @@ Vite SPA (React 19) ──→ Falcon ──→ Rails API ──→ PostgreSQL 17
 
 **Fat model / skinny controller.** Controllers: auth, params, service call, render. Models: validations, scopes, associations. Service objects for multi-step business logic — avoid ActiveRecord callbacks for complex workflows.
 
+## Frontend SPA Conventions
+
+- Keep the SPA chat-first. New navigation must not break the `/chat` flow.
+- Use `react-router` for app navigation and routed layouts.
+- Keep one React component per file. If a file starts accumulating helper components, split them.
+- Move non-visual logic into `hooks/`, `config/`, `services/`, or `types/` instead of burying it inside JSX files.
+- Prefer pure render logic over unnecessary effects. Use `useEffect` only for real external synchronization.
+- Small, focused files beat monolithic screen components. Route pages should mostly compose reusable components.
+
 ## Workspace Isolation
 
 Two-layer defence: `WorkspaceScoped` default_scope (application) + PostgreSQL RLS policy (database).

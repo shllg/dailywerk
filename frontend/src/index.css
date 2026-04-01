@@ -1,2 +1,23 @@
 @import "tailwindcss";
 @plugin "daisyui";
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #02030a;
+  color: #e5eef9;
+  font-family:
+    "Avenir Next",
+    "Segoe UI Variable",
+    "Segoe UI",
+    sans-serif;
+}
