@@ -19,9 +19,9 @@ DailyWerk's Claude Code and Codex configuration follows a "grow with the code" s
 
 ## Deferred Rules
 
-### Rule: User Isolation / RLS (`05-user-isolation.md`)
+### ~~Rule: User Isolation / RLS (`05-user-isolation.md`)~~ — Done
 
-**Trigger:** After RLS middleware is implemented and first 3 RLS-scoped models are committed.
+**Trigger:** After RLS middleware is implemented and first 3 RLS-scoped models are committed. **Met:** WorkspaceScoped, RlsMigrationHelpers, Agent/Session/Message all exist.
 
 **Content outline:**
 - PostgreSQL Row-Level Security pattern: `SET LOCAL app.current_workspace_id` in middleware
@@ -34,9 +34,9 @@ DailyWerk's Claude Code and Codex configuration follows a "grow with the code" s
 
 **Why deferred:** RLS middleware, user model, and scoped tables don't exist yet. Rules referencing these patterns would cause AI to hallucinate implementations.
 
-### Rule: LLM Patterns (`06-llm-patterns.md`)
+### ~~Rule: LLM Patterns (`06-llm-patterns.md`)~~ — Done
 
-**Trigger:** After ruby_llm gem is added to Gemfile and first agent/chat model is committed.
+**Trigger:** After ruby_llm gem is added to Gemfile and first agent/chat model is committed. **Met:** ruby_llm 1.14, Agent, AgentRuntime, CompactionService all exist.
 
 **Content outline:**
 - ruby_llm framework: `RubyLLM::Chat`, `RubyLLM::Agent`, `acts_as_chat`
@@ -61,9 +61,9 @@ DailyWerk's Claude Code and Codex configuration follows a "grow with the code" s
 
 **Why deferred:** Only bare scaffold (App.tsx, main.tsx) exists. Patterns should emerge from actual development before being codified.
 
-### Rule: Testing Conventions (`08-testing.md`)
+### ~~Rule: Testing Conventions (`08-testing.md`)~~ — Done
 
-**Trigger:** After test suite has 10+ test files.
+**Trigger:** After test suite has 10+ test files. **Met:** 19 test files exist.
 
 **Content outline:**
 - Minitest patterns and fixtures with UUIDv7 IDs
@@ -74,9 +74,9 @@ DailyWerk's Claude Code and Codex configuration follows a "grow with the code" s
 
 **Why deferred:** Only one health controller test exists. Testing conventions should emerge from the first wave of real tests.
 
-### Rule: Background Jobs (`09-background-jobs.md`)
+### ~~Rule: Background Jobs (`09-background-jobs.md`)~~ — Done
 
-**Trigger:** After 3+ job classes exist beyond ApplicationJob.
+**Trigger:** After 3+ job classes exist beyond ApplicationJob. **Met:** ChatStreamJob, CompactionJob, ArchiveStaleSessionsJob.
 
 **Content outline:**
 - GoodJob external mode patterns, queue naming (`llm:3`, `embeddings:2`, `maintenance:1`, `default:4`)
@@ -135,12 +135,12 @@ DailyWerk's Claude Code and Codex configuration follows a "grow with the code" s
 
 | Skill | Trigger |
 |-------|---------|
-| `rails-model` | After first 3 models with RLS are committed |
-| `rails-service` | After first 3 service objects with established patterns |
-| `rails-testing` | After test suite conventions are established |
+| ~~`rails-model`~~ | ~~After first 3 models with RLS are committed~~ | **Done** |
+| ~~`rails-service`~~ | ~~After first 3 service objects with established patterns~~ | **Done** |
+| ~~`rails-testing`~~ | ~~After test suite conventions are established~~ | **Done** |
 | `rails-review` | After code-reviewer agent is created |
 | `react-frontend` | After frontend component patterns solidify |
-| `rails-job` | After 3+ job classes with GoodJob patterns |
+| ~~`rails-job`~~ | ~~After 3+ job classes with GoodJob patterns~~ | **Done** |
 | `codex-review` | After primary review workflow is established |
 | `gemini-review` | After primary review workflow is established |
 

@@ -4,14 +4,32 @@ prefix_rule(pattern=["git", "diff"], decision="allow")
 prefix_rule(pattern=["git", "log"], decision="allow")
 prefix_rule(pattern=["git", "show"], decision="allow")
 prefix_rule(pattern=["git", "branch"], decision="allow")
+prefix_rule(pattern=["git", "fetch"], decision="allow")
+prefix_rule(pattern=["git", "grep"], decision="allow")
 
-# Allow quality checks
+# Allow quality checks and bundle commands
 prefix_rule(pattern=["bundle", "exec", "rails", "test"], decision="allow")
 prefix_rule(pattern=["bundle", "exec", "rubocop"], decision="allow")
 prefix_rule(pattern=["bundle", "exec", "brakeman"], decision="allow")
 prefix_rule(pattern=["bundle", "exec", "bundler-audit"], decision="allow")
+prefix_rule(pattern=["bundle", "exec"], decision="allow")
+prefix_rule(pattern=["bundle"], decision="allow")
+
+# Allow Rails and Ruby commands
+prefix_rule(pattern=["bin", "rails"], decision="allow")
+prefix_rule(pattern=["bin", "dev"], decision="allow")
+prefix_rule(pattern=["rake"], decision="allow")
+prefix_rule(pattern=["ruby"], decision="allow")
+
+# Allow frontend package manager
 prefix_rule(pattern=["pnpm", "test"], decision="allow")
 prefix_rule(pattern=["pnpm", "run", "lint"], decision="allow")
+prefix_rule(pattern=["pnpm"], decision="allow")
+prefix_rule(pattern=["npx"], decision="allow")
+
+# Allow Docker Compose read commands
+prefix_rule(pattern=["docker", "compose", "ps"], decision="allow")
+prefix_rule(pattern=["docker", "compose", "logs"], decision="allow")
 
 # Allow read-only exploration
 prefix_rule(pattern=["cat"], decision="allow")
@@ -21,6 +39,9 @@ prefix_rule(pattern=["head"], decision="allow")
 prefix_rule(pattern=["tail"], decision="allow")
 prefix_rule(pattern=["wc"], decision="allow")
 prefix_rule(pattern=["rg"], decision="allow")
+prefix_rule(pattern=["jq"], decision="allow")
+prefix_rule(pattern=["tree"], decision="allow")
+prefix_rule(pattern=["sort"], decision="allow")
 
 # Forbid destructive git ops
 prefix_rule(pattern=["git", "push"], decision="forbidden")
@@ -28,3 +49,4 @@ prefix_rule(pattern=["git", "reset"], decision="forbidden")
 prefix_rule(pattern=["git", "checkout"], decision="forbidden")
 prefix_rule(pattern=["git", "add"], decision="forbidden")
 prefix_rule(pattern=["git", "commit"], decision="forbidden")
+prefix_rule(pattern=["sudo"], decision="forbidden")
