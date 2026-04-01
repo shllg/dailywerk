@@ -21,7 +21,7 @@ phase: 2
 
 Voice messages are the dominant input modality on Signal, Telegram, and WhatsApp. All three platforms encode voice as OGG/Opus. The [bridge protocol RFC](2026-03-30-messaging-gateway-and-bridge-protocol.md) already carries `attachments[]` with `mime_type`, `download_url`, `byte_size` on inbound events, and specifies that Core fetches and stores attachments from the bridge's temporary URL (§Attachments). No code currently handles attachments — this is greenfield.
 
-ruby_llm v1.14+ has built-in `RubyLLM.transcribe()` supporting OGG, MP3, WAV, WebM, M4A. The [session management RFC](2026-03-31-agent-session-management.md) already defines `media_description` on messages and `content_for_context` (D8), plus `MessageSummarizer` for long text condensation (D7). Voice messages slot into these patterns naturally: transcribe → store transcript as `content` → treat like any text message for compaction.
+ruby_llm v1.14+ has built-in `RubyLLM.transcribe()` supporting OGG, MP3, WAV, WebM, M4A. The [session management RFC](../rfc-done/2026-03-31-agent-session-management.md) already defines `media_description` on messages and `content_for_context` (D8), plus `MessageSummarizer` for long text condensation (D7). Voice messages slot into these patterns naturally: transcribe → store transcript as `content` → treat like any text message for compaction.
 
 ### What This RFC Covers
 
@@ -59,7 +59,7 @@ All platforms standardize on OGG/Opus — `RubyLLM.transcribe()` handles all of 
 
 ## 2. Transcription Model Selection
 
-The transcription model is **configurable per agent** via `agent.params["transcription_model"]`, following the same pattern as the compaction model in the [session management RFC](2026-03-31-agent-session-management.md).
+The transcription model is **configurable per agent** via `agent.params["transcription_model"]`, following the same pattern as the compaction model in the [session management RFC](../rfc-done/2026-03-31-agent-session-management.md).
 
 ### Landscape (March 2026)
 
@@ -106,7 +106,7 @@ Six new columns on `messages`:
 | `media_byte_size` | bigint, nullable | File size in bytes |
 | `transcription_status` | string, nullable | `pending` / `completed` / `failed` |
 
-`media_description` already exists from the [session management RFC](2026-03-31-agent-session-management.md) migration.
+`media_description` already exists from the [session management RFC](../rfc-done/2026-03-31-agent-session-management.md) migration.
 
 ### D2: Single background job for the full pipeline
 

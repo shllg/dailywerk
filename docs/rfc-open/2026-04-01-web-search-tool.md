@@ -62,7 +62,7 @@ Brave Search is the only independent Western search index since Bing Search API 
 ### What This RFC Does NOT Cover
 
 - Other tools (notes, memory, vault, email, calendar) — future RFCs add entries to `ToolRegistry`
-- Runtime wiring (`SimpleChatService` / `AgentRuntime` tool support) — deferred to [RFC Session Management](2026-03-31-agent-session-management.md) or a dedicated tools-runtime RFC
+- Runtime wiring (`SimpleChatService` / `AgentRuntime` tool support) — deferred to [RFC Session Management](../rfc-done/2026-03-31-agent-session-management.md) or a dedicated tools-runtime RFC
 - BYOK for search API keys — deferred until `api_credentials` table ships
 - MCP tool integration — see [PRD 04 §7](../prd/04-billing-and-operations.md#7-mcp--model-context-protocol)
 - Full billing infrastructure (`UsageRecord` table creation) — see [PRD 04 §3-5](../prd/04-billing-and-operations.md#3-credit-system)

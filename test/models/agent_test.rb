@@ -88,7 +88,9 @@ class AgentTest < ActiveSupport::TestCase
       oversized_stop = "x" * 10_500
       agent = build_agent(
         params: {
+          compaction_model: "gpt-4o-mini",
           max_tokens: 512,
+          session_timeout_hours: 4,
           unsupported: true,
           stop: oversized_stop
         }

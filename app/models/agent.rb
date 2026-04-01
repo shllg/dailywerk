@@ -7,7 +7,15 @@ class Agent < ApplicationRecord
   ALLOWED_PROVIDERS = %w[openai openai_responses anthropic google].freeze
   IDENTITY_ALLOWED_KEYS = %w[persona tone constraints].freeze
   THINKING_ALLOWED_KEYS = %w[enabled budget_tokens].freeze
-  PARAMS_ALLOWED_KEYS = %w[max_tokens top_p frequency_penalty presence_penalty stop].freeze
+  PARAMS_ALLOWED_KEYS = %w[
+    compaction_model
+    frequency_penalty
+    max_tokens
+    presence_penalty
+    session_timeout_hours
+    stop
+    top_p
+  ].freeze
   MAX_CONFIG_TEXT_LENGTH = 50_000
   MAX_IDENTITY_VALUE_LENGTH = 20_000
   MAX_PARAMS_JSON_BYTESIZE = 10.kilobytes

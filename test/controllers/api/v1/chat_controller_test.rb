@@ -26,11 +26,14 @@ class Api::V1::ChatControllerTest < ActionDispatch::IntegrationTest
     ActiveJob::Base.queue_adapter = @original_queue_adapter
   end
 
-  test "show returns the current session and message history" do
+  test "show returns the current session metadata and active message history" do
     session = with_current_workspace(@workspace, user: @user) do
       resolved_session = Session.resolve(agent: @agent)
+      resolved_session.model.update!(context_window: 100)
+      resolved_session.update!(summary: "Previous context")
       resolved_session.messages.create!(role: "user", content: "Hello")
       resolved_session.messages.create!(role: "assistant", content: "Hi there")
+      resolved_session.messages.create!(role: "assistant", content: "Old summary detail", compacted: true)
       resolved_session
     end
 
@@ -40,14 +43,16 @@ class Api::V1::ChatControllerTest < ActionDispatch::IntegrationTest
     body = JSON.parse(response.body)
 
     assert_equal(
-      [ session.id, @agent.id, @agent.name, %w[user assistant] ],
+      [ session.id, @agent.id, @agent.name, "Previous context", %w[user assistant] ],
       [
         body["session_id"],
         body.dig("agent", "id"),
         body.dig("agent", "name"),
+        body["session_summary"],
         body["messages"].map { |message| message["role"] }
       ]
     )
+    assert_in_delta 0.04, body["context_window_usage"]
   end
 
   test "create enqueues the stream job for a non-blank message" do

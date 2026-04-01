@@ -228,7 +228,10 @@ CREATE TABLE public.messages (
     response_id character varying,
     created_at timestamp(6) without time zone NOT NULL,
     updated_at timestamp(6) without time zone NOT NULL,
-    tool_call_id uuid
+    tool_call_id uuid,
+    compacted boolean DEFAULT false NOT NULL,
+    importance integer,
+    media_description text
 );
 
 ALTER TABLE ONLY public.messages FORCE ROW LEVEL SECURITY;
@@ -281,7 +284,12 @@ CREATE TABLE public.sessions (
     total_tokens integer DEFAULT 0 NOT NULL,
     last_activity_at timestamp(6) without time zone,
     created_at timestamp(6) without time zone NOT NULL,
-    updated_at timestamp(6) without time zone NOT NULL
+    updated_at timestamp(6) without time zone NOT NULL,
+    summary text,
+    title character varying,
+    context_data jsonb DEFAULT '{}'::jsonb NOT NULL,
+    started_at timestamp(6) without time zone,
+    ended_at timestamp(6) without time zone
 );
 
 ALTER TABLE ONLY public.sessions FORCE ROW LEVEL SECURITY;
@@ -468,6 +476,13 @@ ALTER TABLE ONLY public.workspace_memberships
 
 ALTER TABLE ONLY public.workspaces
     ADD CONSTRAINT workspaces_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: idx_messages_session_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_messages_session_active ON public.messages USING btree (session_id) WHERE (compacted = false);
 
 
 --
@@ -958,6 +973,8 @@ CREATE POLICY workspace_isolation ON public.tool_calls TO app_user USING ((EXIST
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260401090100'),
+('20260401090000'),
 ('20260331100000'),
 ('20260330100600'),
 ('20260330100560'),

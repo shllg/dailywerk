@@ -18,7 +18,9 @@ module Api
             slug: agent.slug,
             name: agent.name
           },
-          messages: session.messages
+          session_summary: session.summary,
+          context_window_usage: session.context_window_usage.round(2),
+          messages: session.context_messages
                            .where(role: %w[user assistant system])
                            .order(:created_at)
                            .map { |message| message_json(message) }

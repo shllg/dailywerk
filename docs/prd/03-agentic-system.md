@@ -3,7 +3,7 @@ type: prd
 title: Agentic System
 domain: agents
 created: 2026-03-28
-updated: 2026-03-30
+updated: 2026-04-01
 status: canonical
 depends_on:
   - prd/01-platform-and-infrastructure
@@ -25,7 +25,7 @@ implemented_by:
 > For channel adapters and vault sync: see [02-integrations-and-channels.md](./02-integrations-and-channels.md).
 > For BYOK, MCP, cost tracking, and GoodJob config: see [04-billing-and-operations.md](./04-billing-and-operations.md).
 
-**Implementation status:** [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) implements the first slice — simple chat with a single agent (no tools, no memory, no handoffs). [RFC Agent Configuration](../rfc-done/2026-03-31-agent-configuration.md) (done) adds soul/identity/thinking config, provider selection, `PromptBuilder` service, `AgentDefaults` with reset-to-defaults, `AgentsController` REST API (show/update/reset), and a frontend settings drawer. [RFC Session Management](../rfc-open/2026-03-31-agent-session-management.md) adds compaction, context building, and session archival. [RFC Debug Tools](../rfc-open/2026-03-31-debug-tools.md) adds developer-mode debugging UI. [RFC Web Search Tool](../rfc-open/2026-04-01-web-search-tool.md) establishes the ToolRegistry foundation and adds Brave Search as the first agent tool (default-on, deactivatable). Sections below describe the full target architecture.
+**Implementation status:** [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) implements the first slice — simple chat with a single agent (no tools, no memory, no handoffs). [RFC Agent Configuration](../rfc-done/2026-03-31-agent-configuration.md) (done) adds soul/identity/thinking config, provider selection, `PromptBuilder` service, `AgentDefaults` with reset-to-defaults, `AgentsController` REST API (show/update/reset), and a frontend settings drawer. [RFC Session Management](../rfc-done/2026-03-31-agent-session-management.md) (done) adds compaction, context building, invisible session rotation, and archival. [RFC Debug Tools](../rfc-open/2026-03-31-debug-tools.md) adds developer-mode debugging UI. [RFC Web Search Tool](../rfc-open/2026-04-01-web-search-tool.md) establishes the ToolRegistry foundation and adds Brave Search as the first agent tool (default-on, deactivatable). Sections below describe the full target architecture.
 
 ---
 
@@ -978,8 +978,8 @@ AgentRuntime.new(session:, workspace:)
 
 ## 13. Open Questions
 
-1. **Session quality & robustness** — ~~Needs detailed design for: smart compaction algorithms, session replay for debugging, long message summarization, message searchability.~~ Partially addressed by [RFC Session Management](../rfc-open/2026-03-31-agent-session-management.md) (compaction, long message summarization via `MessageSummarizer`, media description for context replay) and [RFC Debug Tools](../rfc-open/2026-03-31-debug-tools.md) (session replay/inspection). **Remaining**: message searchability across sessions, memory promotion heuristics.
-2. **Compaction concurrency** — ~~Advisory lock prevents concurrent compaction on same session.~~ Addressed by [RFC Session Management](../rfc-open/2026-03-31-agent-session-management.md) — uses GoodJob `perform_limit: 1` concurrency controls instead of advisory locks (fiber-safe).
+1. **Session quality & robustness** — ~~Needs detailed design for: smart compaction algorithms, session replay for debugging, long message summarization, message searchability.~~ Partially addressed by [RFC Session Management](../rfc-done/2026-03-31-agent-session-management.md) (compaction, long message summarization via `MessageSummarizer`, media replay contract via `media_description`) and [RFC Debug Tools](../rfc-open/2026-03-31-debug-tools.md) (session replay/inspection). **Remaining**: message searchability across sessions, memory promotion heuristics.
+2. **Compaction concurrency** — ~~Advisory lock prevents concurrent compaction on same session.~~ Addressed by [RFC Session Management](../rfc-done/2026-03-31-agent-session-management.md) — uses GoodJob concurrency controls instead of advisory locks (fiber-safe).
 3. **Provider failover** — LLM router should fall back to OpenRouter when primary provider fails. Not yet implemented in AgentRuntime.
 4. **Handoff cycle detection** — Currently relies on `handoff_targets` not containing cycles. Should validate acyclicity at agent save time (topological sort or DFS).
-5. **Session continuity verification** — Verify that ruby_llm's `acts_as_chat` auto-loads persisted messages into the chat context. If not, explicit message injection is needed. **Spike planned** in [RFC Session Management](../rfc-open/2026-03-31-agent-session-management.md) Phase 1.
+5. **Session continuity verification** — ruby_llm's `acts_as_chat` association override was verified in the shipped [RFC Session Management](../rfc-done/2026-03-31-agent-session-management.md) implementation. Remaining work is broader session searchability and structured memory, not basic replay correctness.

@@ -26,12 +26,12 @@ class ChatStreamJobTest < ActiveSupport::TestCase
     end
 
     broadcasts = []
-    original_new = SimpleChatService.method(:new)
+    original_new = AgentRuntime.method(:new)
     server = ActionCable.server
     original_broadcast = server.method(:broadcast)
 
     begin
-      SimpleChatService.define_singleton_method(:new) do |session:|
+      AgentRuntime.define_singleton_method(:new) do |session:|
         fake_service
       end
       server.define_singleton_method(:broadcast) do |stream, payload|
@@ -40,7 +40,7 @@ class ChatStreamJobTest < ActiveSupport::TestCase
 
       ChatStreamJob.perform_now(session.id, "Hello", workspace_id: workspace.id)
     ensure
-      SimpleChatService.define_singleton_method(:new, original_new)
+      AgentRuntime.define_singleton_method(:new, original_new)
       server.define_singleton_method(:broadcast, original_broadcast)
     end
 

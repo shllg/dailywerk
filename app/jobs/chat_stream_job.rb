@@ -18,7 +18,7 @@ class ChatStreamJob < ApplicationJob
     session = Session.find(session_id)
     assistant_message = nil
 
-    SimpleChatService.new(session:).call(user_message) do |chunk|
+    AgentRuntime.new(session:).call(user_message) do |chunk|
       next unless chunk.content.present?
 
       assistant_message ||= latest_assistant_message_for(session)

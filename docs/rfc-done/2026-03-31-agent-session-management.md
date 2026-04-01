@@ -2,14 +2,15 @@
 type: rfc
 title: Agent Session Management
 created: 2026-03-31
-updated: 2026-03-31
-status: draft
+updated: 2026-04-01
+status: done
 implements:
   - prd/01-platform-and-infrastructure
   - prd/03-agentic-system
 depends_on:
   - rfc/2026-03-29-simple-chat-conversation
   - rfc/2026-03-31-agent-configuration
+implemented_by: []
 phase: 2
 ---
 
@@ -17,7 +18,7 @@ phase: 2
 
 ## Context
 
-[RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) implemented a minimal session model with `SimpleChatService` — no compaction, no context window management, no session archival. Long conversations will eventually hit the LLM's context window limit and fail.
+[RFC 002](./2026-03-29-simple-chat-conversation.md) implemented a minimal session model with `SimpleChatService` — no compaction, no context window management, no session archival. Long conversations will eventually hit the LLM's context window limit and fail.
 
 The PRD defines the full session lifecycle ([03 §3](../prd/03-agentic-system.md#3-agent-runtime-react-loop), [03 §5](../prd/03-agentic-system.md#5-session-management), [03 §8](../prd/03-agentic-system.md#8-compaction)): context building, compaction at 75% capacity, and archival of stale sessions. This RFC implements that lifecycle.
 
@@ -30,7 +31,7 @@ The PRD defines the full session lifecycle ([03 §3](../prd/03-agentic-system.md
 - `CompactionService` for summarizing old messages
 - `MessageSummarizer` for condensing long messages during compaction (short → verbatim, long → summarized)
 - `ContextBuilder` for assembling what the LLM actually sees, including cross-session context bridge
-- Media message handling: text description instead of raw binary during context replay
+- Media replay contract via `media_description` and `content_for_context` for future multimodal flows
 - `CompactionJob` — async compaction via GoodJob with concurrency controls
 - `ArchiveStaleSessionsJob` — GoodJob cron for session cleanup
 - `ChatStreamJob` update to use `AgentRuntime`
@@ -45,7 +46,13 @@ The PRD defines the full session lifecycle ([03 §3](../prd/03-agentic-system.md
 - Handoffs (HandoffTool, multi-agent routing) (see [PRD 03 §4](../prd/03-agentic-system.md#4-multi-agent-routing--handoffs))
 - Memory extraction (MemoryExtractionJob) — hooks exist but are no-ops until memory ships
 - OpenAI Responses API server-side compaction — future optimization
-- Voice message processing — see [RFC Voice Message Processing](2026-03-31-voice-message-processing.md) (builds on D7 MessageSummarizer and D8 media_description)
+- Voice message processing — see [RFC Voice Message Processing](../rfc-open/2026-03-31-voice-message-processing.md) (builds on D7 MessageSummarizer and D8 media_description)
+
+## Implementation Notes
+
+- Implemented and verified in `Session`, `Message`, `AgentRuntime`, `ContextBuilder`, `CompactionService`, `MessageSummarizer`, `CompactionJob`, `ArchiveStaleSessionsJob`, and the chat controller/job integration.
+- The `acts_as_chat messages: :context_messages` spike passed and is covered by automated tests: ruby_llm replays only active, non-compacted messages.
+- `media_description` is implemented as the replay/storage hook in this RFC. Automatic population of that field is intentionally deferred to media-specific ingestion work such as voice/image processing.
 
 ---
 
@@ -60,10 +67,12 @@ These decisions resolve issues identified during planning. Each addresses a spec
 **Solution**: Override the messages association used by `acts_as_chat` with a scoped association that excludes compacted messages:
 
 ```ruby
-acts_as_chat messages: :context_messages, model_class: "RubyLLM::ModelRecord"
+acts_as_chat messages: :context_messages,
+             message_class: "Message",
+             model_class: "RubyLLM::ModelRecord"
 
 has_many :context_messages,
-         -> { where(compacted: [false, nil]).order(:created_at) },
+         -> { where(compacted: false).order(:created_at) },
          class_name: "Message",
          foreign_key: :session_id,
          inverse_of: :session
@@ -109,8 +118,11 @@ Use `char / 4` heuristic for fast in-request estimates (fiber-safe, no CPU block
 
 ```ruby
 class CompactionJob < ApplicationJob
+  include GoodJob::ActiveJobExtensions::Concurrency
+
   good_job_control_concurrency_with(
     perform_limit: 1,
+    total_limit: 2,
     key: -> { "compaction_#{arguments.first}" }  # session_id
   )
 end
@@ -191,12 +203,13 @@ This is the same pattern used in the compaction pipeline of other projects — a
 
 **Problem**: When the conversation includes images or other media (via multimodal models), replaying the raw binary/base64 data into the context window on subsequent turns is wasteful and often impossible after compaction. An image that consumed 1,000+ tokens in the original turn should not be re-sent on every subsequent turn.
 
-**Solution**: When a message contains media (images, files), the system stores a text description of what was observed alongside the original. During context replay (compaction or context building), only the text description is used — never the raw media.
+**Solution**: The session layer supports storing a text description alongside raw media and replaying that description instead of the original payload. During context replay (compaction or context building), `content_for_context` prefers `media_description` when it is present and otherwise falls back to normal text content.
 
 Implementation:
 - Messages with media attachments store the original in `content_raw` (already exists in schema).
-- After the assistant processes a media message, a post-processing step extracts a text description: `"[Image: user uploaded a photo showing a restaurant menu with Italian dishes, prices ranging from €12-28]"`.
-- During compaction and context replay, `content_for_context` returns this description instead of the raw media payload.
+- The session-management implementation adds the `media_description` column and `content_for_context` helper.
+- Media-specific RFCs are responsible for populating `media_description` for each attachment type.
+- During compaction and context replay, `content_for_context` returns this description instead of the raw media payload when available.
 - The `Message` model gets a `media_description` text column (added in migration) and a `content_for_context` method.
 
 ```ruby
@@ -213,13 +226,13 @@ def content_for_context
 end
 ```
 
-The media description is generated by the LLM on the original turn (the model already "sees" the image), extracted via a lightweight post-processing step, and stored for all future context use. This means the image is processed exactly once.
+This RFC implements the replay contract, not the extraction pipeline. Once an upstream media processor stores `media_description`, the session layer automatically reuses it for all future context replay.
 
 ### D9: Invisible session rotation at resolve time
 
 **Problem**: The user sees one continuous conversation per agent. But sessions must rotate to keep the LLM context manageable. A 7-day cron job is too coarse — a user returning after 4 hours of inactivity should get a fresh context, not continue a stale one. On external gateways (Telegram, Signal), the user always sees old messages — session boundaries must be invisible.
 
-**Solution**: `Session.resolve` checks if the current active session is stale before returning it. If stale, it archives the old session and creates a fresh one in a single transaction. The new session inherits the old session's summary for context continuity. The inactivity threshold is configurable per agent.
+**Solution**: `Session.resolve` checks if the current active session is stale before returning it. If stale, it archives the old session and creates a fresh one immediately. The new session inherits the old session's summary for context continuity. The inactivity threshold is configurable per agent.
 
 ```ruby
 # In Session.resolve, after finding the active session:
@@ -1053,9 +1066,9 @@ end
 | BYOK user without OpenAI | Compaction model falls back to agent's configured model. If that also fails, compaction is skipped. |
 | Message with nil content | `content_for_context` returns `""` via `.to_s`. `MessageSummarizer` returns blank strings as-is. |
 | Very long user message (50k+ chars) | `MessageSummarizer` condenses to ~400 chars for the compaction prompt, preserving key facts. Original is retained in `content` for debug tools. |
-| Image/media message | On the original turn, the model sees the image. Post-processing stores a text description in `media_description`. All subsequent context replays and compaction use the description, not the binary. |
+| Image/media message | If a media ingestion flow stores `media_description`, all subsequent context replays and compaction use that text instead of the raw payload. Automatic population is deferred to media-specific RFCs. |
 | `MessageSummarizer` LLM call fails | Falls back to `text.truncate(500)`. Compaction continues with degraded but functional summaries. |
-| Multiple images in one message | `media_description` describes all images. Content block structure is preserved in `content_raw` for debug inspection. |
+| Multiple images in one message | The replay contract supports a single aggregated `media_description`. Media-specific ingestion code is responsible for producing that aggregate description. |
 | System messages in compaction set | Explicitly excluded from compaction — they're regenerated each turn via PromptBuilder. Prevents duplicate system messages after compaction. |
 
 ---
@@ -1085,7 +1098,7 @@ end
 11. **Spike passes**: `acts_as_chat messages: :context_messages` sends only non-compacted messages to LLM
 12. `MessageSummarizer.call(short_text)` returns text verbatim
 13. `MessageSummarizer.call(long_text)` returns condensed version (~400 chars) preserving key facts
-14. Media messages use `media_description` in `content_for_context`, not raw content
+14. `content_for_context` prefers `media_description` when present, otherwise falls back to normal text content
 15. Compaction of a session with a 50k-char message produces a useful summary (not truncated garbage)
 16. `bundle exec rails test` passes
 17. `bundle exec rubocop` passes

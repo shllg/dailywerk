@@ -52,7 +52,7 @@ depends_on:
 |------|--------|-------|
 | Tool system / ReAct loop | PRD 03 §3, §6 | Full `AgentRuntime` with tool execution loop. RFC: Agent Session Management designed for future tool extension. |
 | Memory architecture (5-layer) | PRD 03 §7 | Long-term memory, daily logs, conversation archives, user profile synthesis. Not yet implemented. |
-| ~~Compaction~~ | PRD 03 §8 | **(RFC in progress)** Context-window compaction at 75% usage. See [RFC: Agent Session Management](../rfc-open/2026-03-31-agent-session-management.md). |
+| ~~Compaction~~ | PRD 03 §8 | **Done.** Context-window compaction ships at 75% estimated usage. See [RFC: Agent Session Management](../rfc-done/2026-03-31-agent-session-management.md). |
 | Multi-agent routing / handoffs | PRD 03 §4 | `HandoffTool` for inter-agent delegation. `agent_channel_bindings` for message routing. |
 | ~~Smart session rotation~~ | RFC: Agent Session Management D9 | **Done** — inline rotation in `Session.resolve` based on configurable inactivity timeout (default 4h). |
 | Cross-session structured memory (Level 3) | RFC: Agent Session Management D10, PRD 03 §7 | Replace/enhance the summary + sliding window bridge with structured fact extraction. During compaction or archival, extract key facts, preferences, decisions, and user profile data into `memory_entries`. Agent queries these at context-build time for precise recall across sessions. Depends on Memory Architecture (PRD 03 §7). The Level 1+2 bridge (summary + summarized recent messages) is the interim solution. |
