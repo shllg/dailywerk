@@ -7,6 +7,21 @@ Rails.application.configure do
       cron: "0 3 * * *",
       class: "ArchiveStaleSessionsJob",
       description: "Archive sessions inactive for more than 7 days"
+    },
+    vault_s3_sync: {
+      cron: "*/5 * * * *",
+      class: "VaultS3SyncAllJob",
+      description: "Sync all active vault changes to S3"
+    },
+    vault_reindex_stale: {
+      cron: "*/30 * * * *",
+      class: "VaultReindexStaleJob",
+      description: "Re-index vault files missing embeddings"
+    },
+    vault_reconciliation: {
+      cron: "0 */6 * * *",
+      class: "VaultReconciliationJob",
+      description: "Full disk-vs-DB consistency check"
     }
   }
 end

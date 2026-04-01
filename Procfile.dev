@@ -1,3 +1,4 @@
 api: bundle exec falcon serve --bind http://localhost:${PORT:-3000}
 worker: bundle exec good_job start
 frontend: cd frontend && VITE_API_PORT=${VITE_API_PORT:-3000} pnpm dev --port ${VITE_PORT:-5173}
+vault_watcher: bundle exec ruby -e "require_relative 'config/environment'; VaultWatcher.new.run"

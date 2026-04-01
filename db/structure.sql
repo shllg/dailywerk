@@ -25,6 +25,20 @@ COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions';
 
 
 --
+-- Name: vector; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION vector; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION vector IS 'vector data type and ivfflat and hnsw access methods';
+
+
+--
 -- Name: gen_random_uuid_v7(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -59,6 +73,20 @@ BEGIN
     substr(encoded, 21, 12)
   )::uuid;
 END;
+$$;
+
+
+--
+-- Name: vault_chunks_tsvector_update(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.vault_chunks_tsvector_update() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.tsv := to_tsvector('english', coalesce(NEW.content, ''));
+  RETURN NEW;
+END
 $$;
 
 
@@ -330,6 +358,97 @@ CREATE TABLE public.users (
 
 
 --
+-- Name: vault_chunks; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vault_chunks (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    vault_file_id uuid NOT NULL,
+    workspace_id uuid NOT NULL,
+    file_path character varying NOT NULL,
+    chunk_idx integer NOT NULL,
+    content text NOT NULL,
+    heading_path character varying,
+    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL,
+    tsv tsvector,
+    embedding public.vector(1536)
+);
+
+ALTER TABLE ONLY public.vault_chunks FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: vault_files; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vault_files (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    vault_id uuid NOT NULL,
+    workspace_id uuid NOT NULL,
+    path character varying NOT NULL,
+    content_hash character varying NOT NULL,
+    size_bytes bigint DEFAULT 0 NOT NULL,
+    content_type character varying,
+    file_type character varying NOT NULL,
+    frontmatter jsonb DEFAULT '{}'::jsonb NOT NULL,
+    tags character varying[] DEFAULT '{}'::character varying[] NOT NULL,
+    title character varying,
+    last_modified timestamp(6) without time zone,
+    indexed_at timestamp(6) without time zone,
+    synced_at timestamp(6) without time zone,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+ALTER TABLE ONLY public.vault_files FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: vault_links; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vault_links (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    source_id uuid NOT NULL,
+    target_id uuid NOT NULL,
+    workspace_id uuid NOT NULL,
+    link_type character varying NOT NULL,
+    link_text character varying,
+    context text,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+ALTER TABLE ONLY public.vault_links FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: vaults; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vaults (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    workspace_id uuid NOT NULL,
+    name character varying NOT NULL,
+    slug character varying NOT NULL,
+    vault_type character varying DEFAULT 'native'::character varying NOT NULL,
+    encryption_key_enc text NOT NULL,
+    max_size_bytes bigint DEFAULT '2147483648'::bigint NOT NULL,
+    current_size_bytes bigint DEFAULT 0 NOT NULL,
+    file_count integer DEFAULT 0 NOT NULL,
+    status character varying DEFAULT 'active'::character varying NOT NULL,
+    error_message text,
+    settings jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+ALTER TABLE ONLY public.vaults FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: workspace_memberships; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -460,6 +579,38 @@ ALTER TABLE ONLY public.tool_calls
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: vault_chunks vault_chunks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vault_chunks
+    ADD CONSTRAINT vault_chunks_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: vault_files vault_files_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vault_files
+    ADD CONSTRAINT vault_files_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: vault_links vault_links_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vault_links
+    ADD CONSTRAINT vault_links_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: vaults vaults_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vaults
+    ADD CONSTRAINT vaults_pkey PRIMARY KEY (id);
 
 
 --
@@ -787,6 +938,146 @@ CREATE UNIQUE INDEX index_users_on_workos_id ON public.users USING btree (workos
 
 
 --
+-- Name: index_vault_chunks_on_embedding; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_chunks_on_embedding ON public.vault_chunks USING hnsw (embedding public.vector_cosine_ops);
+
+
+--
+-- Name: index_vault_chunks_on_tsv; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_chunks_on_tsv ON public.vault_chunks USING gin (tsv);
+
+
+--
+-- Name: index_vault_chunks_on_vault_file_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_chunks_on_vault_file_id ON public.vault_chunks USING btree (vault_file_id);
+
+
+--
+-- Name: index_vault_chunks_on_vault_file_id_and_chunk_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_vault_chunks_on_vault_file_id_and_chunk_idx ON public.vault_chunks USING btree (vault_file_id, chunk_idx);
+
+
+--
+-- Name: index_vault_chunks_on_workspace_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_chunks_on_workspace_id ON public.vault_chunks USING btree (workspace_id);
+
+
+--
+-- Name: index_vault_chunks_on_workspace_id_and_file_path; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_chunks_on_workspace_id_and_file_path ON public.vault_chunks USING btree (workspace_id, file_path);
+
+
+--
+-- Name: index_vault_files_on_content_hash; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_files_on_content_hash ON public.vault_files USING btree (content_hash);
+
+
+--
+-- Name: index_vault_files_on_tags; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_files_on_tags ON public.vault_files USING gin (tags);
+
+
+--
+-- Name: index_vault_files_on_vault_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_files_on_vault_id ON public.vault_files USING btree (vault_id);
+
+
+--
+-- Name: index_vault_files_on_vault_id_and_path; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_vault_files_on_vault_id_and_path ON public.vault_files USING btree (vault_id, path);
+
+
+--
+-- Name: index_vault_files_on_workspace_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_files_on_workspace_id ON public.vault_files USING btree (workspace_id);
+
+
+--
+-- Name: index_vault_files_on_workspace_id_and_file_type; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_files_on_workspace_id_and_file_type ON public.vault_files USING btree (workspace_id, file_type);
+
+
+--
+-- Name: index_vault_links_on_source_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_links_on_source_id ON public.vault_links USING btree (source_id);
+
+
+--
+-- Name: index_vault_links_on_source_id_and_target_id_and_link_type; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_vault_links_on_source_id_and_target_id_and_link_type ON public.vault_links USING btree (source_id, target_id, link_type);
+
+
+--
+-- Name: index_vault_links_on_target_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_links_on_target_id ON public.vault_links USING btree (target_id);
+
+
+--
+-- Name: index_vault_links_on_workspace_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_links_on_workspace_id ON public.vault_links USING btree (workspace_id);
+
+
+--
+-- Name: index_vault_links_on_workspace_id_and_link_type; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_links_on_workspace_id_and_link_type ON public.vault_links USING btree (workspace_id, link_type);
+
+
+--
+-- Name: index_vaults_on_workspace_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vaults_on_workspace_id ON public.vaults USING btree (workspace_id);
+
+
+--
+-- Name: index_vaults_on_workspace_id_and_slug; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_vaults_on_workspace_id_and_slug ON public.vaults USING btree (workspace_id, slug);
+
+
+--
+-- Name: index_vaults_on_workspace_id_and_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vaults_on_workspace_id_and_status ON public.vaults USING btree (workspace_id, status);
+
+
+--
 -- Name: index_workspace_memberships_on_user_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -815,6 +1106,13 @@ CREATE INDEX index_workspaces_on_owner_id ON public.workspaces USING btree (owne
 
 
 --
+-- Name: vault_chunks vault_chunks_tsvector_trigger; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER vault_chunks_tsvector_trigger BEFORE INSERT OR UPDATE OF content ON public.vault_chunks FOR EACH ROW EXECUTE FUNCTION public.vault_chunks_tsvector_update();
+
+
+--
 -- Name: messages fk_rails_1ee2a92df0; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -828,6 +1126,14 @@ ALTER TABLE ONLY public.messages
 
 ALTER TABLE ONLY public.workspace_memberships
     ADD CONSTRAINT fk_rails_26c4c0bd41 FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
+
+
+--
+-- Name: vault_links fk_rails_4351d8fa9b; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vault_links
+    ADD CONSTRAINT fk_rails_4351d8fa9b FOREIGN KEY (target_id) REFERENCES public.vault_files(id) ON DELETE CASCADE;
 
 
 --
@@ -847,6 +1153,30 @@ ALTER TABLE ONLY public.messages
 
 
 --
+-- Name: vault_links fk_rails_62373dcda0; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vault_links
+    ADD CONSTRAINT fk_rails_62373dcda0 FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
+
+
+--
+-- Name: vault_links fk_rails_72d57f066f; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vault_links
+    ADD CONSTRAINT fk_rails_72d57f066f FOREIGN KEY (source_id) REFERENCES public.vault_files(id) ON DELETE CASCADE;
+
+
+--
+-- Name: vault_files fk_rails_827af47546; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vault_files
+    ADD CONSTRAINT fk_rails_827af47546 FOREIGN KEY (vault_id) REFERENCES public.vaults(id);
+
+
+--
 -- Name: sessions fk_rails_85704b4d26; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -855,11 +1185,27 @@ ALTER TABLE ONLY public.sessions
 
 
 --
+-- Name: vault_chunks fk_rails_8c1e896a8a; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vault_chunks
+    ADD CONSTRAINT fk_rails_8c1e896a8a FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
+
+
+--
 -- Name: tool_calls fk_rails_9c8daee481; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.tool_calls
     ADD CONSTRAINT fk_rails_9c8daee481 FOREIGN KEY (message_id) REFERENCES public.messages(id);
+
+
+--
+-- Name: vault_files fk_rails_a8600483c9; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vault_files
+    ADD CONSTRAINT fk_rails_a8600483c9 FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
 
 
 --
@@ -903,6 +1249,22 @@ ALTER TABLE ONLY public.messages
 
 
 --
+-- Name: vaults fk_rails_d1c7090852; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vaults
+    ADD CONSTRAINT fk_rails_d1c7090852 FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
+
+
+--
+-- Name: vault_chunks fk_rails_d20f090cb5; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vault_chunks
+    ADD CONSTRAINT fk_rails_d20f090cb5 FOREIGN KEY (vault_file_id) REFERENCES public.vault_files(id);
+
+
+--
 -- Name: agents fk_rails_f9d68ffa97; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -933,6 +1295,30 @@ ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE public.tool_calls ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: vault_chunks; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.vault_chunks ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: vault_files; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.vault_files ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: vault_links; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.vault_links ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: vaults; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.vaults ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: agents workspace_isolation; Type: POLICY; Schema: public; Owner: -
@@ -967,12 +1353,45 @@ CREATE POLICY workspace_isolation ON public.tool_calls TO app_user USING ((EXIST
 
 
 --
+-- Name: vault_chunks workspace_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY workspace_isolation ON public.vault_chunks TO app_user USING (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true))) WITH CHECK (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true)));
+
+
+--
+-- Name: vault_files workspace_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY workspace_isolation ON public.vault_files TO app_user USING (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true))) WITH CHECK (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true)));
+
+
+--
+-- Name: vault_links workspace_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY workspace_isolation ON public.vault_links TO app_user USING (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true))) WITH CHECK (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true)));
+
+
+--
+-- Name: vaults workspace_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY workspace_isolation ON public.vaults TO app_user USING (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true))) WITH CHECK (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true)));
+
+
+--
 -- PostgreSQL database dump complete
 --
 
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260401100400'),
+('20260401100300'),
+('20260401100200'),
+('20260401100100'),
+('20260401100000'),
 ('20260401090100'),
 ('20260401090000'),
 ('20260331100000'),

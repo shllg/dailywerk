@@ -73,6 +73,11 @@ Rails.application.configure do
     "http://localhost:3000"
   ]
 
+  config.x.vault_s3_bucket = "dailywerk-dev"
+  config.x.vault_s3_endpoint = "http://localhost:#{ENV.fetch("DAILYWERK_S3_PORT", 9002)}"
+  config.x.vault_s3_region = "us-east-1"
+  config.x.vault_local_base = Rails.root.join("tmp/workspaces").to_s
+
   # Raise error when a before_action's only/except options reference missing actions.
   config.action_controller.raise_on_missing_callback_actions = true
 
