@@ -1,8 +1,20 @@
-FROM docker.io/docker:27-cli
+FROM node:22-alpine AS build
+
+WORKDIR /listener
+
+RUN corepack enable
+
+COPY deploy/listener/package.json deploy/listener/pnpm-lock.yaml deploy/listener/tsconfig.json ./
+RUN pnpm install --frozen-lockfile
+
+COPY deploy/listener/server.ts ./server.ts
+RUN pnpm run build
+
+FROM node:22-alpine
 
 ARG OP_VERSION=2.31.1
 
-RUN apk add --no-cache bash curl jq python3 unzip util-linux && \
+RUN apk add --no-cache bash curl docker-cli jq unzip util-linux && \
     ARCH="$(apk --print-arch)" && \
     case "${ARCH}" in \
       x86_64) OP_ARCH=amd64 ;; \
@@ -17,5 +29,6 @@ RUN apk add --no-cache bash curl jq python3 unzip util-linux && \
 WORKDIR /deploy
 
 COPY deploy /deploy
+COPY --from=build /listener/dist/server.js /deploy/listener/server.js
 
-ENTRYPOINT ["python3", "/deploy/listener/server.py"]
+ENTRYPOINT ["node", "/deploy/listener/server.js"]
