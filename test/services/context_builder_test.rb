@@ -3,7 +3,7 @@
 require "test_helper"
 
 class ContextBuilderTest < ActiveSupport::TestCase
-  test "build returns the prompt and metadata without summary" do
+  test "build returns the prompt without summary" do
     user, workspace = create_user_with_workspace
 
     with_current_workspace(workspace, user:) do
@@ -15,10 +15,31 @@ class ContextBuilderTest < ActiveSupport::TestCase
       )
       session = Session.resolve(agent:)
 
-      payload = ContextBuilder.new(session:).build
+      payload = with_empty_memory_context do
+        ContextBuilder.new(session:).build
+      end
 
       assert_includes payload[:system_prompt], "Be concise."
       assert_includes payload[:system_prompt], "## Knowledge Contract"
+    end
+  end
+
+  test "build returns metadata defaults without summary" do
+    user, workspace = create_user_with_workspace
+
+    with_current_workspace(workspace, user:) do
+      agent = Agent.create!(
+        slug: "main",
+        name: "DailyWerk",
+        model_id: "gpt-5.4",
+        instructions: "Be concise."
+      )
+      session = Session.resolve(agent:)
+
+      payload = with_empty_memory_context do
+        ContextBuilder.new(session:).build
+      end
+
       assert_equal 0, payload[:active_message_count]
       assert_equal 0, payload[:estimated_tokens]
     end
@@ -32,7 +53,9 @@ class ContextBuilderTest < ActiveSupport::TestCase
       session = Session.resolve(agent:)
       session.update!(summary: "Earlier discussion")
 
-      payload = ContextBuilder.new(session:).build
+      payload = with_empty_memory_context do
+        ContextBuilder.new(session:).build
+      end
 
       assert_includes payload[:system_prompt], "## Previous Context\n\nEarlier discussion"
     end
@@ -54,7 +77,9 @@ class ContextBuilderTest < ActiveSupport::TestCase
         "#{model}: #{text.to_s.upcase}"
       end
 
-      payload = ContextBuilder.new(session: current_session).build
+      payload = with_empty_memory_context do
+        ContextBuilder.new(session: current_session).build
+      end
 
       assert_includes payload[:system_prompt], "## Recent Messages (from previous session)"
       assert_includes payload[:system_prompt], "[user] gpt-5.4: VERY LONG PRIOR MESSAGE"
@@ -76,10 +101,28 @@ class ContextBuilderTest < ActiveSupport::TestCase
       current_session = Session.resolve(agent:)
       current_session.messages.create!(role: "user", content: "Current message")
 
-      payload = ContextBuilder.new(session: current_session).build
+      payload = with_empty_memory_context do
+        ContextBuilder.new(session: current_session).build
+      end
 
       assert_equal 1, payload[:active_message_count]
       assert_not_includes payload[:system_prompt], "## Recent Messages (from previous session)"
     end
+  end
+
+  private
+
+  def with_empty_memory_context
+    original_new = MemoryRetrievalService.method(:new)
+    fake_service = Object.new
+    fake_service.define_singleton_method(:build_context) { { memories: [], archives: [] } }
+
+    MemoryRetrievalService.define_singleton_method(:new) do |*_args, **_kwargs|
+      fake_service
+    end
+
+    yield
+  ensure
+    MemoryRetrievalService.define_singleton_method(:new, original_new)
   end
 end

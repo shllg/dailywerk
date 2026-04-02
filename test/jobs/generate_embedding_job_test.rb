@@ -5,7 +5,6 @@ require "test_helper"
 class GenerateEmbeddingJobTest < ActiveSupport::TestCase
   test "updates the chunk embedding with the provider result" do
     user, workspace = create_user_with_workspace
-    original_embed = RubyLLM.method(:embed)
 
     with_current_workspace(workspace, user:) do
       vault = Vault.create!(name: "Knowledge", slug: "knowledge", vault_type: "native")
@@ -27,15 +26,11 @@ class GenerateEmbeddingJobTest < ActiveSupport::TestCase
         content: "embedded content #{'x' * 120}"
       )
 
-      RubyLLM.define_singleton_method(:embed) do |_content|
-        Struct.new(:vectors).new(Array.new(1536, 0.1))
+      with_stubbed_ruby_llm_embed do
+        GenerateEmbeddingJob.perform_now("VaultChunk", chunk.id, workspace_id: workspace.id)
       end
-
-      GenerateEmbeddingJob.perform_now("VaultChunk", chunk.id, workspace_id: workspace.id)
 
       assert_equal 1536, chunk.reload.embedding.length
     end
-  ensure
-    RubyLLM.define_singleton_method(:embed, original_embed)
   end
 end

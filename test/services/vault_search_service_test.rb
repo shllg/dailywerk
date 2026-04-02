@@ -30,7 +30,9 @@ class VaultSearchServiceTest < ActiveSupport::TestCase
         content: "alpha beta gamma"
       )
 
-      results = VaultSearchService.new(vault: vault).search("beta")
+      results = with_stubbed_ruby_llm_embed do
+        VaultSearchService.new(vault: vault).search("beta")
+      end
 
       assert_equal [ chunk.id ], results.map(&:id)
     end

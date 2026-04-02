@@ -42,5 +42,18 @@ module ActiveSupport
 
       { "Authorization" => "Bearer #{token}" }
     end
+
+    def with_stubbed_ruby_llm_embed(value: 0.1, default_dimensions: 1536)
+      original_embed = RubyLLM.method(:embed)
+
+      RubyLLM.define_singleton_method(:embed) do |*_args, **kwargs|
+        dimensions = kwargs[:dimensions] || default_dimensions
+        Struct.new(:vectors).new(Array.new(dimensions, value))
+      end
+
+      yield
+    ensure
+      RubyLLM.define_singleton_method(:embed, original_embed)
+    end
   end
 end

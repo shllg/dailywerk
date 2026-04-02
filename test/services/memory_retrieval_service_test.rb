@@ -70,7 +70,9 @@ class MemoryRetrievalServiceTest < ActiveSupport::TestCase
         active: true
       )
 
-      MemoryRetrievalService.new(session:).build_context
+      with_stubbed_ruby_llm_embed do
+        MemoryRetrievalService.new(session:).build_context
+      end
     end
   end
 end
