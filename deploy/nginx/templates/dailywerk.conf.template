@@ -1,0 +1,80 @@
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  '' close;
+}
+
+include /etc/nginx/generated/upstreams.conf;
+
+server {
+  listen 80;
+  server_name ${APP_HOST} ${STAGING_HOST};
+  return 301 https://$host$request_uri;
+}
+
+server {
+  listen 443 ssl http2;
+  server_name ${APP_HOST};
+
+  ssl_certificate /etc/nginx/certs/origin.crt;
+  ssl_certificate_key /etc/nginx/certs/origin.key;
+  ssl_client_certificate /etc/nginx/certs/cloudflare-origin-pull-ca.pem;
+  ssl_verify_client on;
+
+  location /api/ {
+    proxy_pass http://prod_api;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }
+
+  location /cable {
+    proxy_pass http://prod_api/cable;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }
+
+  location / {
+    proxy_pass http://prod_frontend;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }
+}
+
+server {
+  listen 443 ssl http2;
+  server_name ${STAGING_HOST};
+
+  ssl_certificate /etc/nginx/certs/origin.crt;
+  ssl_certificate_key /etc/nginx/certs/origin.key;
+  ssl_client_certificate /etc/nginx/certs/cloudflare-origin-pull-ca.pem;
+  ssl_verify_client on;
+
+  location /api/ {
+    proxy_pass http://staging_api;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }
+
+  location /cable {
+    proxy_pass http://staging_api/cable;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }
+
+  location / {
+    proxy_pass http://staging_frontend;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }
+}

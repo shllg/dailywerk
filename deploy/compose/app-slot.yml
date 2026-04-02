@@ -1,0 +1,53 @@
+services:
+  frontend:
+    image: ${FRONTEND_IMAGE:?set FRONTEND_IMAGE}
+    restart: unless-stopped
+    networks:
+      - edge
+
+  api:
+    image: ${API_IMAGE:?set API_IMAGE}
+    restart: unless-stopped
+    command: ["/rails/docker/api/server"]
+    env_file:
+      - ${APP_ENV_FILE:?set APP_ENV_FILE}
+    environment:
+      BUILD_SHA: ${BUILD_SHA:-}
+      BUILD_REF: ${BUILD_REF:-}
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:?set APP_ENVIRONMENT}
+      PORT: 3000
+    volumes:
+      - ${WORKSPACE_ROOT:?set WORKSPACE_ROOT}:/data/workspaces
+    healthcheck:
+      test: ["CMD", "/rails/docker/api/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - infra
+      - edge
+
+  worker:
+    image: ${API_IMAGE:?set API_IMAGE}
+    restart: unless-stopped
+    command: ["/rails/docker/api/worker"]
+    env_file:
+      - ${APP_ENV_FILE:?set APP_ENV_FILE}
+    environment:
+      BUILD_SHA: ${BUILD_SHA:-}
+      BUILD_REF: ${BUILD_REF:-}
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:?set APP_ENVIRONMENT}
+    volumes:
+      - ${WORKSPACE_ROOT:?set WORKSPACE_ROOT}:/data/workspaces
+    networks:
+      - infra
+      - edge
+
+networks:
+  infra:
+    external: true
+    name: dailywerk-infra
+  edge:
+    external: true
+    name: dailywerk-edge

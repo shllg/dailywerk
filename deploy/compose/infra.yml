@@ -1,0 +1,45 @@
+name: dailywerk-infra
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg17}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set POSTGRES_SUPERUSER_PASSWORD}
+      DAILYWERK_DB_APP_USER: ${DAILYWERK_DB_APP_USER:-dailywerk}
+      DAILYWERK_DB_APP_PASSWORD: ${DAILYWERK_DB_APP_PASSWORD:?set DAILYWERK_DB_APP_PASSWORD}
+      DAILYWERK_PRODUCTION_DB: ${DAILYWERK_PRODUCTION_DB:-dailywerk_production}
+      DAILYWERK_STAGING_DB: ${DAILYWERK_STAGING_DB:-dailywerk_staging}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ${DAILYWERK_ROOT:-/srv/dailywerk}/deploy/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - infra
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - valkey_data:/data
+    networks:
+      - infra
+
+networks:
+  infra:
+    name: dailywerk-infra
+
+volumes:
+  postgres_data:
+  valkey_data:

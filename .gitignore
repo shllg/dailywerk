@@ -18,6 +18,7 @@
 # Environment files
 /.env*
 !/.env.tpl
+!/.env.example
 
 # Frontend
 /frontend/node_modules

@@ -1,12 +1,12 @@
 development:
   adapter: redis
-  url: <%= ENV.fetch("CABLE_REDIS_URL") { ENV.fetch("REDIS_URL") { "redis://localhost:6399/1" } } %>
-  channel_prefix: <%= ENV.fetch("CABLE_PREFIX") { "dailywerk_development" } %>
+  url: <%= ENV.fetch("VALKEY_URL") { ENV.fetch("CABLE_REDIS_URL") { ENV.fetch("REDIS_URL") { "redis://localhost:6399/1" } } } %>
+  channel_prefix: <%= ENV.fetch("CABLE_NAMESPACE") { ENV.fetch("CABLE_PREFIX") { "dailywerk_development" } } %>
 
 test:
   adapter: test
 
 production:
   adapter: redis
-  url: <%= ENV.fetch("REDIS_URL") { "redis://localhost:6379/1" } %>
-  channel_prefix: dailywerk_production
+  url: <%= ENV.fetch("VALKEY_URL") { ENV.fetch("REDIS_URL") { "redis://localhost:6379/0" } } %>
+  channel_prefix: <%= ENV.fetch("CABLE_NAMESPACE", "dailywerk:prod:cable") %>

@@ -1,0 +1,42 @@
+name: dailywerk-edge
+
+services:
+  nginx:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_HOST: ${APP_HOST:-app.dailywerk.com}
+      STAGING_HOST: ${STAGING_HOST:-staging.dailywerk.com}
+    volumes:
+      - ${DAILYWERK_ROOT:-/srv/dailywerk}/deploy/nginx/templates:/etc/nginx/templates:ro
+      - ${DAILYWERK_ROOT:-/srv/dailywerk}/deploy/nginx/generated:/etc/nginx/generated
+      - ${DAILYWERK_ROOT:-/srv/dailywerk}/config/nginx/certs:/etc/nginx/certs:ro
+    networks:
+      - edge
+
+  deploy-listener:
+    image: ${DEPLOY_LISTENER_IMAGE:-ghcr.io/shllg/dailywerk-deploy-listener:prod-current}
+    restart: unless-stopped
+    env_file:
+      - ${DAILYWERK_ROOT:-/srv/dailywerk}/config/env/op-token.env
+    environment:
+      DAILYWERK_ROOT: ${DAILYWERK_ROOT:-/srv/dailywerk}
+      DEPLOY_LISTENER_HOST: 0.0.0.0
+      DEPLOY_LISTENER_PORT: 8081
+      DEPLOY_WEBHOOK_SECRET_OP_PATH: ${DEPLOY_WEBHOOK_SECRET_OP_PATH:-op://DailyWerk Shared/deploy/webhook-secret}
+      GRAFANA_API_KEY_OP_PATH: ${GRAFANA_API_KEY_OP_PATH:-}
+      GRAFANA_URL: ${GRAFANA_URL:-http://grafana:3000}
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DAILYWERK_ROOT:-/srv/dailywerk}:${DAILYWERK_ROOT:-/srv/dailywerk}
+    networks:
+      - edge
+
+networks:
+  edge:
+    name: dailywerk-edge

@@ -2,7 +2,7 @@
 
 # Stores request-local auth and workspace context.
 class Current < ActiveSupport::CurrentAttributes
-  attribute :user, :workspace, :skip_workspace_scoping
+  attribute :user, :workspace, :skip_workspace_scoping, :request_id
 
   # Clears the workspace when the current user changes.
   #
@@ -39,6 +39,7 @@ class Current < ActiveSupport::CurrentAttributes
     self.user = nil
     self.workspace = nil
     self.skip_workspace_scoping = nil
+    self.request_id = nil
   end
 
   resets do

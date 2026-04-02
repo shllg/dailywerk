@@ -1,0 +1,81 @@
+name: Deploy Notify
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      api_image:
+        required: true
+        type: string
+      frontend_image:
+        required: true
+        type: string
+      build_sha:
+        required: true
+        type: string
+      build_ref:
+        required: true
+        type: string
+    secrets:
+      DEPLOY_WEBHOOK_URL:
+        required: true
+      DEPLOY_WEBHOOK_SECRET:
+        required: true
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+      api_image:
+        required: true
+        type: string
+      frontend_image:
+        required: true
+        type: string
+      build_sha:
+        required: true
+        type: string
+      build_ref:
+        required: true
+        type: string
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send deploy webhook
+        env:
+          DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+          DEPLOY_WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          API_IMAGE: ${{ inputs.api_image }}
+          FRONTEND_IMAGE: ${{ inputs.frontend_image }}
+          BUILD_SHA: ${{ inputs.build_sha }}
+          BUILD_REF: ${{ inputs.build_ref }}
+        run: |
+          payload="$(jq -nc \
+            --arg environment "${ENVIRONMENT}" \
+            --arg api_image "${API_IMAGE}" \
+            --arg frontend_image "${FRONTEND_IMAGE}" \
+            --arg build_sha "${BUILD_SHA}" \
+            --arg build_ref "${BUILD_REF}" \
+            '{
+              environment: $environment,
+              api_image: $api_image,
+              frontend_image: $frontend_image,
+              build_sha: $build_sha,
+              build_ref: $build_ref
+            }'
+          )"
+
+          signature="sha256=$(printf '%s' "${payload}" | openssl dgst -sha256 -hmac "${DEPLOY_WEBHOOK_SECRET}" -binary | xxd -p -c 256)"
+
+          curl -fsS -X POST "${DEPLOY_WEBHOOK_URL}" \
+            -H "Content-Type: application/json" \
+            -H "X-DailyWerk-Signature: ${signature}" \
+            -d "${payload}"

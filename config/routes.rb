@@ -1,5 +1,7 @@
 Rails.application.routes.draw do
   get "up" => "rails/health#show", as: :rails_health_check
+  get "ready", to: "ready#show"
+  get "metrics", to: "metrics#show"
 
   mount GoodJob::Engine => "good_job"
   mount ActionCable.server => "/cable"

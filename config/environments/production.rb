@@ -1,4 +1,5 @@
 require "active_support/core_ext/integer/time"
+require_relative "../../lib/structured_log_formatter"
 
 Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb.
@@ -18,8 +19,8 @@ Rails.application.configure do
   # Enable serving of images, stylesheets, and JavaScripts from an asset server.
   # config.asset_host = "http://assets.example.com"
 
-  # Store uploaded files on the local file system (see config/storage.yml for options).
-  config.active_storage.service = :local
+  # Store uploaded files in Hetzner Object Storage via the S3-compatible adapter.
+  config.active_storage.service = :hetzner
 
   # Assume all access to the app is happening through a SSL-terminating reverse proxy.
   config.assume_ssl = true
@@ -30,15 +31,16 @@ Rails.application.configure do
   # Skip http-to-https redirect for the default health check endpoint.
   # config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }
 
-  # Log to STDOUT with the current request id as a default log tag.
-  config.log_tags = [ :request_id ]
-  config.logger   = ActiveSupport::TaggedLogging.logger(STDOUT)
+  config.log_level = ENV.fetch("RAILS_LOG_LEVEL", "info").to_sym
 
-  # Change to "debug" to log everything (including potentially personally-identifiable information!).
-  config.log_level = ENV.fetch("RAILS_LOG_LEVEL", "info")
+  if ActiveModel::Type::Boolean.new.cast(ENV.fetch("RAILS_LOG_TO_STDOUT", "true"))
+    logger = ActiveSupport::Logger.new($stdout)
+    logger.formatter = StructuredLogFormatter.new
+    config.logger = logger
+  end
 
   # Prevent health checks from clogging up the logs.
-  config.silence_healthcheck_path = "/up"
+  config.silence_healthcheck_path = "/ready"
 
   # Don't log any deprecations.
   config.active_support.report_deprecations = false
@@ -69,11 +71,19 @@ Rails.application.configure do
   # the I18n.default_locale when a translation cannot be found).
   config.i18n.fallbacks = true
 
-  config.x.vault_s3_bucket = ENV["VAULT_S3_BUCKET"]
-  config.x.vault_s3_endpoint = ENV["VAULT_S3_ENDPOINT"]
-  config.x.vault_s3_region = ENV.fetch("VAULT_S3_REGION", "fsn1")
+  config.cache_store = :redis_cache_store, {
+    url: ENV.fetch("VALKEY_URL"),
+    namespace: ENV.fetch("CACHE_NAMESPACE", "dailywerk:prod:cache")
+  }
+
+  config.action_cable.url = "wss://#{ENV.fetch("APP_HOST")}/cable"
+  config.action_cable.allowed_request_origins = ENV.fetch("ACTION_CABLE_ALLOWED_ORIGINS", "").split(",").map(&:strip).reject(&:blank?)
+
+  config.x.vault_s3_bucket = ENV["S3_BUCKET"].presence || ENV["VAULT_S3_BUCKET"]
+  config.x.vault_s3_endpoint = ENV["AWS_ENDPOINT"].presence || ENV["VAULT_S3_ENDPOINT"]
+  config.x.vault_s3_region = ENV["AWS_REGION"].presence || ENV.fetch("VAULT_S3_REGION", "fsn1")
   config.x.vault_s3_require_https_for_sse_cpk = ActiveModel::Type::Boolean.new.cast(
-    ENV.fetch("VAULT_S3_REQUIRE_HTTPS_FOR_SSE_CPK", "true")
+    ENV.fetch("S3_REQUIRE_HTTPS_FOR_SSE_CPK") { ENV.fetch("VAULT_S3_REQUIRE_HTTPS_FOR_SSE_CPK", "true") }
   )
   config.x.vault_local_base = ENV.fetch("VAULT_LOCAL_BASE", "/data/workspaces")
 
@@ -83,12 +93,5 @@ Rails.application.configure do
   # Only use :id for inspections in production.
   config.active_record.attributes_for_inspect = [ :id ]
 
-  # Enable DNS rebinding protection and other `Host` header attacks.
-  # config.hosts = [
-  #   "example.com",     # Allow requests from example.com
-  #   /.*\.example\.com/ # Allow requests from subdomains like `www.example.com`
-  # ]
-  #
-  # Skip DNS rebinding protection for the default health check endpoint.
-  # config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
+  config.hosts = [ ENV["APP_HOST"] ].compact_blank
 end

@@ -1,4 +1,5 @@
 require_relative "boot"
+require_relative "../lib/metrics/request_middleware"
 
 require "rails/all"
 
@@ -45,5 +46,6 @@ module Dailywerk
     config.middleware.use ActionDispatch::Session::CookieStore, key: "_dailywerk_session"
     config.middleware.use ActionDispatch::Flash
     config.middleware.use Rack::MethodOverride
+    config.middleware.insert_before Rails::Rack::Logger, Metrics::RequestMiddleware
   end
 end

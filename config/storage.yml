@@ -14,3 +14,12 @@ rustfs:
   bucket: <%= ENV.fetch("RUSTFS_BUCKET") { "dailywerk-dev" } %>
   endpoint: <%= ENV.fetch("RUSTFS_ENDPOINT") { "http://localhost:9002" } %>
   force_path_style: true
+
+hetzner:
+  service: S3
+  access_key_id: <%= ENV["AWS_ACCESS_KEY_ID"].presence || ENV["RUSTFS_ACCESS_KEY"] %>
+  secret_access_key: <%= ENV["AWS_SECRET_ACCESS_KEY"].presence || ENV["RUSTFS_SECRET_KEY"] %>
+  region: <%= ENV["AWS_REGION"].presence || "fsn1" %>
+  bucket: <%= ENV["S3_BUCKET"].presence || ENV["RUSTFS_BUCKET"] %>
+  endpoint: <%= ENV["AWS_ENDPOINT"].presence || ENV["RUSTFS_ENDPOINT"] %>
+  force_path_style: <%= ActiveModel::Type::Boolean.new.cast(ENV.fetch("AWS_FORCE_PATH_STYLE", "true")) %>

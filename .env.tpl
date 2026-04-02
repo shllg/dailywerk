@@ -7,15 +7,21 @@ DB_APP_PASSWORD=dailywerk_app_password
 # DB_NAME=dailywerk_development          # Override for worktrees
 
 # Valkey (Redis-compatible, cache + pub/sub)
-REDIS_URL=redis://localhost:6399/0
-# CABLE_REDIS_URL=redis://localhost:6399/1  # ActionCable (defaults to REDIS_URL)
-# CABLE_PREFIX=dailywerk_development        # ActionCable channel prefix
+VALKEY_URL=redis://localhost:6399/0
+# REDIS_URL=redis://localhost:6399/0          # Legacy fallback
+# CABLE_NAMESPACE=dailywerk_development       # ActionCable channel prefix
 
 # RustFS (S3-compatible storage)
-RUSTFS_ENDPOINT=http://localhost:9002
-RUSTFS_ACCESS_KEY=rustfsadmin
-RUSTFS_SECRET_KEY=rustfsadmin
-RUSTFS_BUCKET=dailywerk-dev
+AWS_ENDPOINT=http://localhost:9002
+AWS_ACCESS_KEY_ID=rustfsadmin
+AWS_SECRET_ACCESS_KEY=rustfsadmin
+AWS_REGION=us-east-1
+AWS_FORCE_PATH_STYLE=true
+S3_BUCKET=dailywerk-dev
+# RUSTFS_ENDPOINT=http://localhost:9002       # Legacy fallback
+# RUSTFS_ACCESS_KEY=rustfsadmin               # Legacy fallback
+# RUSTFS_SECRET_KEY=rustfsadmin               # Legacy fallback
+# RUSTFS_BUCKET=dailywerk-dev                 # Legacy fallback
 
 # Mail (Mailcatcher)
 SMTP_HOST=localhost

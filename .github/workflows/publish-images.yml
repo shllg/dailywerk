@@ -1,0 +1,186 @@
+name: Publish Images
+
+on:
+  push:
+    branches:
+      - master
+      - develop
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.vars.outputs.environment }}
+      tag_prefix: ${{ steps.vars.outputs.tag_prefix }}
+      channel_tag: ${{ steps.vars.outputs.channel_tag }}
+      owner: ${{ steps.vars.outputs.owner }}
+      api_image: ${{ steps.vars.outputs.api_image }}
+      frontend_image: ${{ steps.vars.outputs.frontend_image }}
+      listener_image: ${{ steps.vars.outputs.listener_image }}
+      build_created: ${{ steps.vars.outputs.build_created }}
+    steps:
+      - id: vars
+        env:
+          INPUT_ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          owner="$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          environment="${INPUT_ENVIRONMENT:-}"
+
+          if [[ -z "${environment}" ]]; then
+            case "${GITHUB_REF_NAME}" in
+              master) environment="production" ;;
+              develop) environment="staging" ;;
+              *)
+                echo "Unsupported ref for image publishing: ${GITHUB_REF_NAME}" >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+          if [[ "${environment}" == "production" ]]; then
+            tag_prefix="prod"
+            channel_tag="prod-current"
+          else
+            tag_prefix="staging"
+            channel_tag="staging-current"
+          fi
+
+          {
+            echo "environment=${environment}"
+            echo "tag_prefix=${tag_prefix}"
+            echo "channel_tag=${channel_tag}"
+            echo "owner=${owner}"
+            echo "api_image=ghcr.io/${owner}/dailywerk-api"
+            echo "frontend_image=ghcr.io/${owner}/dailywerk-frontend"
+            echo "listener_image=ghcr.io/${owner}/dailywerk-deploy-listener"
+            echo "build_created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "${GITHUB_OUTPUT}"
+
+  api:
+    runs-on: ubuntu-latest
+    needs: metadata
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.api
+          push: true
+          provenance: false
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+          tags: |
+            ${{ needs.metadata.outputs.api_image }}:${{ needs.metadata.outputs.tag_prefix }}-${{ github.sha }}
+            ${{ needs.metadata.outputs.api_image }}:${{ needs.metadata.outputs.channel_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.ref.name=${{ github.ref_name }}
+            org.opencontainers.image.created=${{ needs.metadata.outputs.build_created }}
+
+  frontend:
+    runs-on: ubuntu-latest
+    needs: metadata
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          push: true
+          provenance: false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+          tags: |
+            ${{ needs.metadata.outputs.frontend_image }}:${{ needs.metadata.outputs.tag_prefix }}-${{ github.sha }}
+            ${{ needs.metadata.outputs.frontend_image }}:${{ needs.metadata.outputs.channel_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.ref.name=${{ github.ref_name }}
+            org.opencontainers.image.created=${{ needs.metadata.outputs.build_created }}
+
+  deploy-listener:
+    runs-on: ubuntu-latest
+    needs: metadata
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./deploy/listener/Dockerfile
+          push: true
+          provenance: false
+          cache-from: type=gha,scope=deploy-listener
+          cache-to: type=gha,mode=max,scope=deploy-listener
+          tags: |
+            ${{ needs.metadata.outputs.listener_image }}:${{ needs.metadata.outputs.tag_prefix }}-${{ github.sha }}
+            ${{ needs.metadata.outputs.listener_image }}:${{ needs.metadata.outputs.channel_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.ref.name=${{ github.ref_name }}
+            org.opencontainers.image.created=${{ needs.metadata.outputs.build_created }}
+
+  notify-deploy:
+    needs:
+      - metadata
+      - api
+      - frontend
+    uses: ./.github/workflows/deploy-notify.yml
+    with:
+      environment: ${{ needs.metadata.outputs.environment }}
+      api_image: ${{ needs.metadata.outputs.api_image }}@${{ needs.api.outputs.digest }}
+      frontend_image: ${{ needs.metadata.outputs.frontend_image }}@${{ needs.frontend.outputs.digest }}
+      build_sha: ${{ github.sha }}
+      build_ref: ${{ github.ref_name }}
+    secrets: inherit

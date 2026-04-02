@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec bundle exec falcon serve --bind "http://0.0.0.0:${PORT:-3000}"

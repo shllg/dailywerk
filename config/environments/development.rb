@@ -25,7 +25,7 @@ Rails.application.configure do
 
   # Valkey cache store (Redis-compatible)
   config.cache_store = :redis_cache_store, {
-    url: ENV.fetch("REDIS_URL") { "redis://localhost:6399/0" },
+    url: ENV.fetch("VALKEY_URL") { ENV.fetch("REDIS_URL") { "redis://localhost:6399/0" } },
     expires_in: 1.hour
   }
 
@@ -73,10 +73,14 @@ Rails.application.configure do
     "http://localhost:3000"
   ]
 
-  config.x.vault_s3_bucket = "dailywerk-dev"
-  config.x.vault_s3_endpoint = "http://localhost:#{ENV.fetch("DAILYWERK_S3_PORT", 9002)}"
-  config.x.vault_s3_region = "us-east-1"
-  config.x.vault_s3_require_https_for_sse_cpk = false
+  config.x.vault_s3_bucket = ENV.fetch("S3_BUCKET") { ENV.fetch("RUSTFS_BUCKET", "dailywerk-dev") }
+  config.x.vault_s3_endpoint = ENV.fetch("AWS_ENDPOINT") do
+    ENV.fetch("RUSTFS_ENDPOINT") { "http://localhost:#{ENV.fetch("DAILYWERK_S3_PORT", 9002)}" }
+  end
+  config.x.vault_s3_region = ENV.fetch("AWS_REGION") { "us-east-1" }
+  config.x.vault_s3_require_https_for_sse_cpk = ActiveModel::Type::Boolean.new.cast(
+    ENV.fetch("S3_REQUIRE_HTTPS_FOR_SSE_CPK", "false")
+  )
   config.x.vault_local_base = Rails.root.join("tmp/workspaces").to_s
 
   # Raise error when a before_action's only/except options reference missing actions.

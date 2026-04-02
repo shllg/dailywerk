@@ -9,6 +9,15 @@ module ApplicationCable
       payload = verified_payload
       self.current_user = find_verified_user(payload)
       self.current_workspace = find_verified_workspace(current_user, payload)
+      Metrics::Registry.increment_action_cable_connections
+      @metrics_connection_registered = true
+    end
+
+    def disconnect
+      return unless @metrics_connection_registered
+
+      Metrics::Registry.decrement_action_cable_connections
+      @metrics_connection_registered = false
     end
 
     private
