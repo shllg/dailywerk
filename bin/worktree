@@ -222,7 +222,7 @@ If no command is provided, defaults to 'list'.
 Examples:
   bin/worktree setup feature/calendar-sync
   bin/worktree setup feature/calendar-sync --db-mode new
-  bin/worktree setup new-feature --from main
+  bin/worktree setup new-feature --from master
   bin/worktree setup feature/api --port 3105
   bin/worktree update calendar-sync
   bin/worktree update

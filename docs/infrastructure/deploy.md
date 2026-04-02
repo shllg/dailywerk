@@ -2,7 +2,7 @@
 
 The production and staging deploy path is image-driven:
 
-1. `master` publishes `dailywerk-api`, `dailywerk-frontend`, and `dailywerk-deploy-listener` to GHCR.
+1. `master` publishes production images and `dev` publishes staging images for `dailywerk-api`, `dailywerk-frontend`, and `dailywerk-deploy-listener` to GHCR.
 2. [publish-images.yml](/home/sascha/src/dailywerk/dailywerk/.github/workflows/publish-images.yml) calls [deploy-notify.yml](/home/sascha/src/dailywerk/dailywerk/.github/workflows/deploy-notify.yml).
 3. The deploy listener receives the signed webhook on `POST /deploy`.
 4. [perform-deploy.sh](/home/sascha/src/dailywerk/dailywerk/deploy/scripts/perform-deploy.sh) renders the inactive slot env, runs migrations, starts the slot, waits for `/ready`, switches Nginx, annotates Grafana, then stops the old slot.

@@ -347,7 +347,7 @@ Switching should be idempotent and reversible.
 
 ### 7.1 Deploy Listener
 
-The deploy-listener receives a signed webhook when new GHCR images are published for `master` or `develop`.
+The deploy-listener receives a signed webhook when new GHCR images are published for `master` or `dev`.
 
 Expected payload:
 

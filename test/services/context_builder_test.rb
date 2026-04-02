@@ -17,7 +17,8 @@ class ContextBuilderTest < ActiveSupport::TestCase
 
       payload = ContextBuilder.new(session:).build
 
-      assert_equal "Be concise.", payload[:system_prompt]
+      assert_includes payload[:system_prompt], "Be concise."
+      assert_includes payload[:system_prompt], "## Knowledge Contract"
       assert_equal 0, payload[:active_message_count]
       assert_equal 0, payload[:estimated_tokens]
     end

@@ -152,7 +152,7 @@ These are used by the workflow that reacts to published GHCR packages.
 Verify or configure:
 
 - branch protection on `master`
-- branch protection on `develop` if staging uses it
+- branch protection on `dev` if staging uses it
 - GHCR package visibility and access rules
 - GitHub Actions enabled for package publishing
 

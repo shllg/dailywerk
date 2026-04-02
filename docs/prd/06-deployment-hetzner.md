@@ -30,7 +30,7 @@ implemented_by:
 | **Docker-first** | Application and service runtime should rely on Docker images and Docker Compose |
 | **Two environments** | Production and staging on one host with strict isolation |
 | **Zero-downtime deploys** | App deploys must switch traffic without a visible outage |
-| **GHCR-driven delivery** | `master` publishes production images, `develop` publishes staging images |
+| **GHCR-driven delivery** | `master` publishes production images, `dev` publishes staging images |
 | **Local observability** | Metrics, dashboards, and logs stay on the host, reachable via web UI |
 | **Recoverable** | Backups must be compressed, encrypted, restorable, and tested |
 | **Affordable** | Target server cost stays in the ~20–30 EUR/month range |
@@ -200,7 +200,7 @@ Grafana is **not** exposed via Cloudflare. It is reachable only on the Tailscale
 | Branch | Result | Target |
 |--------|--------|--------|
 | `master` | build and publish immutable production images to GHCR | production |
-| `develop` | build and publish immutable staging images to GHCR | staging |
+| `dev` | build and publish immutable staging images to GHCR | staging |
 
 Recommended images:
 

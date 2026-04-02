@@ -242,7 +242,7 @@ The repo should gain workflows that:
 - build frontend and API images
 - push them to GHCR
 - publish immutable tags for each commit
-- publish channel tags for `master` and `develop`
+- publish channel tags for `master` and `dev`
 
 ### 6.2 Deploy Notification Workflow
 
