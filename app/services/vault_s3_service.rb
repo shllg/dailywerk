@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
+require "aws-sdk-s3"
 require "digest"
 require "fileutils"
+require "uri"
 
 # Wraps the S3 interactions for one vault's canonical remote store.
 class VaultS3Service
@@ -171,8 +173,22 @@ class VaultS3Service
         Rails.application.credentials.dig(:hetzner_s3, :endpoint) ||
         Rails.application.credentials.dig(:rustfs, :endpoint) ||
         Rails.application.credentials.dig(:vault_s3, :endpoint),
-      force_path_style: true
+      force_path_style: true,
+      require_https_for_sse_cpk: require_https_for_sse_cpk?
     }.compact
+  end
+
+  # @return [Boolean]
+  def require_https_for_sse_cpk?
+    configured_value = Rails.configuration.x.vault_s3_require_https_for_sse_cpk
+    return configured_value unless configured_value.nil?
+
+    endpoint = Rails.configuration.x.vault_s3_endpoint.presence
+    return true if endpoint.blank?
+
+    URI.parse(endpoint).scheme != "http"
+  rescue URI::InvalidURIError
+    true
   end
 
   # @return [Array<String>]

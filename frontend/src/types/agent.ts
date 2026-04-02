@@ -14,6 +14,7 @@ export interface AgentConfig {
   slug: string
   name: string
   model_id: string
+  memory_isolation: string
   provider: string | null
   temperature: number
   instructions: string | null
@@ -21,26 +22,30 @@ export interface AgentConfig {
   identity: AgentIdentity
   params: Record<string, unknown>
   thinking: AgentThinking
+  tool_names: string[]
   is_default: boolean
   active: boolean
 }
 
-export type AgentConfigUpdate = Pick<
+export type AgentConfigUpdate = Partial<Pick<
   AgentConfig,
   | 'name'
   | 'model_id'
+  | 'memory_isolation'
   | 'provider'
   | 'temperature'
   | 'instructions'
   | 'soul'
   | 'identity'
   | 'thinking'
->
+  | 'tool_names'
+>>
 
 export type AgentDefaults = Pick<
   AgentConfig,
   | 'name'
   | 'model_id'
+  | 'memory_isolation'
   | 'provider'
   | 'temperature'
   | 'instructions'
@@ -48,6 +53,7 @@ export type AgentDefaults = Pick<
   | 'identity'
   | 'params'
   | 'thinking'
+  | 'tool_names'
 >
 
 export interface AgentConfigResponse {

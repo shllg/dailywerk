@@ -6,6 +6,7 @@ class AgentDefaults
     slug: "main",
     name: "DailyWerk",
     model_id: "gpt-5.4",
+    memory_isolation: "shared",
     provider: nil,
     temperature: 0.7,
     instructions: <<~PROMPT.strip,
@@ -16,12 +17,14 @@ class AgentDefaults
     soul: nil,
     identity: {}.freeze,
     params: {}.freeze,
-    thinking: {}.freeze
+    thinking: {}.freeze,
+    tool_names: %w[memory vault].freeze
   }.freeze
 
   CONFIGURABLE_FIELDS = %i[
     name
     model_id
+    memory_isolation
     provider
     temperature
     instructions
@@ -29,6 +32,7 @@ class AgentDefaults
     identity
     params
     thinking
+    tool_names
   ].freeze
 
   class << self

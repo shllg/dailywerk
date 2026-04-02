@@ -9,6 +9,7 @@ import { ChatPage } from './pages/ChatPage'
 import { GatewaysPage } from './pages/GatewaysPage'
 import { InboxPage } from './pages/InboxPage'
 import { IntegrationsPage } from './pages/IntegrationsPage'
+import { MemoryPage } from './pages/MemoryPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { SettingsPage } from './pages/SettingsPage'
 import { VaultPage } from './pages/VaultPage'
@@ -28,6 +29,7 @@ function AuthenticatedApp() {
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/gateways" element={<GatewaysPage />} />
         <Route path="/inbox" element={<InboxPage />} />
+        <Route path="/memory" element={<MemoryPage />} />
         <Route path="/vault" element={<VaultPage />} />
         <Route path="/billing" element={<BillingPage />} />
         <Route path="/integrations" element={<IntegrationsPage />} />

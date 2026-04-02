@@ -11,6 +11,7 @@ Rails.application.routes.draw do
       resources :agents, only: %i[show update] do
         post :reset, on: :member
       end
+      resources :memory_entries, path: "memory", only: %i[index show create update destroy]
       resources :sessions, only: :create
     end
   end

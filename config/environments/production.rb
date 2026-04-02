@@ -72,6 +72,9 @@ Rails.application.configure do
   config.x.vault_s3_bucket = ENV["VAULT_S3_BUCKET"]
   config.x.vault_s3_endpoint = ENV["VAULT_S3_ENDPOINT"]
   config.x.vault_s3_region = ENV.fetch("VAULT_S3_REGION", "fsn1")
+  config.x.vault_s3_require_https_for_sse_cpk = ActiveModel::Type::Boolean.new.cast(
+    ENV.fetch("VAULT_S3_REQUIRE_HTTPS_FOR_SSE_CPK", "true")
+  )
   config.x.vault_local_base = ENV.fetch("VAULT_LOCAL_BASE", "/data/workspaces")
 
   # Do not dump schema after migrations.

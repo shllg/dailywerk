@@ -6,6 +6,8 @@ class GenerateEmbeddingJob < ApplicationJob
   include GoodJob::ActiveJobExtensions::Concurrency
 
   EMBEDDABLE_MODELS = {
+    "ConversationArchive" => ConversationArchive,
+    "MemoryEntry" => MemoryEntry,
     "VaultChunk" => VaultChunk
   }.freeze
 
@@ -28,7 +30,12 @@ class GenerateEmbeddingJob < ApplicationJob
     end
 
     record = model_class.find(record_id)
-    vector = RubyLLM.embed(record.content.to_s).vectors
+    source_text = if record.respond_to?(:embedding_source_text)
+      record.embedding_source_text.to_s
+    else
+      record.content.to_s
+    end
+    vector = RubyLLM.embed(source_text).vectors
     vector = vector.first if vector.is_a?(Array) && vector.first.is_a?(Array)
     record.update!(embedding: vector)
   end

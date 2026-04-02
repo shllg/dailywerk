@@ -2,16 +2,72 @@
 
 # Exposes read/write/search operations for the current workspace vault.
 class VaultTool < RubyLLM::Tool
-  description "Reads, writes, lists, and searches the current workspace vault"
+  ACTIONS = %w[guide update_guide read write list search backlinks].freeze
+  PARAMETERS_SCHEMA = {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ACTIONS,
+        description: "One of: guide, update_guide, read, write, list, search, backlinks"
+      },
+      path: {
+        anyOf: [
+          { type: "string" },
+          { type: "null" }
+        ],
+        description: "Relative vault path"
+      },
+      content: {
+        anyOf: [
+          { type: "string" },
+          { type: "null" }
+        ],
+        description: "Content to write or guide text to apply"
+      },
+      glob: {
+        anyOf: [
+          { type: "string" },
+          { type: "null" }
+        ],
+        description: "Optional glob for list"
+      },
+      query: {
+        anyOf: [
+          { type: "string" },
+          { type: "null" }
+        ],
+        description: "Search query"
+      },
+      limit: {
+        anyOf: [
+          { type: "integer" },
+          { type: "null" }
+        ],
+        description: "Search result limit"
+      },
+      section: {
+        anyOf: [
+          { type: "string" },
+          { type: "null" }
+        ],
+        description: "Guide section key for partial guide updates"
+      },
+      vault_slug: {
+        anyOf: [
+          { type: "string" },
+          { type: "null" }
+        ],
+        description: "Optional vault slug when multiple active vaults exist"
+      }
+    },
+    required: %w[action path content glob query limit section vault_slug],
+    additionalProperties: false
+  }.freeze
 
-  param :action, desc: "One of: guide, update_guide, read, write, list, search, backlinks"
-  param :path, type: :string, desc: "Relative vault path", required: false
-  param :content, type: :string, desc: "Content to write or guide text to apply", required: false
-  param :glob, type: :string, desc: "Optional glob for list", required: false
-  param :query, type: :string, desc: "Search query", required: false
-  param :limit, type: :integer, desc: "Search result limit", required: false
-  param :section, type: :string, desc: "Guide section key for partial guide updates", required: false
-  param :vault_slug, type: :string, desc: "Optional vault slug when multiple active vaults exist", required: false
+  description "Reads, writes, lists, and searches the current workspace vault"
+  params PARAMETERS_SCHEMA
+  with_params(function: { strict: true })
 
   # @param user [User]
   # @param session [Session]

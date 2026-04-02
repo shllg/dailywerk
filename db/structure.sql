@@ -114,7 +114,9 @@ CREATE TABLE public.agents (
     identity jsonb DEFAULT '{}'::jsonb,
     provider character varying,
     params jsonb DEFAULT '{}'::jsonb,
-    thinking jsonb DEFAULT '{}'::jsonb
+    thinking jsonb DEFAULT '{}'::jsonb,
+    memory_isolation character varying DEFAULT 'shared'::character varying NOT NULL,
+    tool_names jsonb DEFAULT '["memory", "vault"]'::jsonb NOT NULL
 );
 
 ALTER TABLE ONLY public.agents FORCE ROW LEVEL SECURITY;
@@ -130,6 +132,30 @@ CREATE TABLE public.ar_internal_metadata (
     created_at timestamp(6) without time zone NOT NULL,
     updated_at timestamp(6) without time zone NOT NULL
 );
+
+
+--
+-- Name: conversation_archives; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.conversation_archives (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    session_id uuid NOT NULL,
+    workspace_id uuid NOT NULL,
+    agent_id uuid NOT NULL,
+    summary text DEFAULT ''::text NOT NULL,
+    key_facts jsonb DEFAULT '[]'::jsonb NOT NULL,
+    message_count integer DEFAULT 0 NOT NULL,
+    total_tokens integer DEFAULT 0 NOT NULL,
+    started_at timestamp(6) without time zone,
+    ended_at timestamp(6) without time zone,
+    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL,
+    embedding public.vector(1536)
+);
+
+ALTER TABLE ONLY public.conversation_archives FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -232,6 +258,56 @@ CREATE TABLE public.good_jobs (
     locked_by_id uuid,
     locked_at timestamp(6) without time zone
 );
+
+
+--
+-- Name: memory_entries; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.memory_entries (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    workspace_id uuid NOT NULL,
+    agent_id uuid,
+    session_id uuid,
+    source_message_id uuid,
+    category character varying DEFAULT 'fact'::character varying NOT NULL,
+    content text NOT NULL,
+    source character varying DEFAULT 'system'::character varying NOT NULL,
+    importance integer DEFAULT 5 NOT NULL,
+    confidence numeric(3,2) DEFAULT 0.7 NOT NULL,
+    access_count integer DEFAULT 0 NOT NULL,
+    last_accessed_at timestamp(6) without time zone,
+    expires_at timestamp(6) without time zone,
+    active boolean DEFAULT true NOT NULL,
+    fingerprint character varying NOT NULL,
+    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL,
+    embedding public.vector(1536)
+);
+
+ALTER TABLE ONLY public.memory_entries FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: memory_entry_versions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.memory_entry_versions (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    memory_entry_id uuid NOT NULL,
+    workspace_id uuid NOT NULL,
+    session_id uuid,
+    editor_user_id uuid,
+    editor_agent_id uuid,
+    action character varying NOT NULL,
+    reason character varying,
+    snapshot jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+ALTER TABLE ONLY public.memory_entry_versions FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -494,6 +570,14 @@ ALTER TABLE ONLY public.ar_internal_metadata
 
 
 --
+-- Name: conversation_archives conversation_archives_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.conversation_archives
+    ADD CONSTRAINT conversation_archives_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: good_job_batches good_job_batches_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -531,6 +615,22 @@ ALTER TABLE ONLY public.good_job_settings
 
 ALTER TABLE ONLY public.good_jobs
     ADD CONSTRAINT good_jobs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: memory_entries memory_entries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memory_entries
+    ADD CONSTRAINT memory_entries_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: memory_entry_versions memory_entry_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memory_entry_versions
+    ADD CONSTRAINT memory_entry_versions_pkey PRIMARY KEY (id);
 
 
 --
@@ -630,6 +730,13 @@ ALTER TABLE ONLY public.workspaces
 
 
 --
+-- Name: idx_conversation_archives_session_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_conversation_archives_session_unique ON public.conversation_archives USING btree (session_id);
+
+
+--
 -- Name: idx_messages_session_active; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -662,6 +769,41 @@ CREATE INDEX index_agents_on_workspace_id_and_is_default ON public.agents USING 
 --
 
 CREATE UNIQUE INDEX index_agents_on_workspace_id_and_slug ON public.agents USING btree (workspace_id, slug);
+
+
+--
+-- Name: index_conversation_archives_on_agent_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_conversation_archives_on_agent_id ON public.conversation_archives USING btree (agent_id);
+
+
+--
+-- Name: index_conversation_archives_on_embedding; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_conversation_archives_on_embedding ON public.conversation_archives USING hnsw (embedding public.vector_cosine_ops);
+
+
+--
+-- Name: index_conversation_archives_on_scope; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_conversation_archives_on_scope ON public.conversation_archives USING btree (workspace_id, agent_id, ended_at);
+
+
+--
+-- Name: index_conversation_archives_on_session_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_conversation_archives_on_session_id ON public.conversation_archives USING btree (session_id);
+
+
+--
+-- Name: index_conversation_archives_on_workspace_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_conversation_archives_on_workspace_id ON public.conversation_archives USING btree (workspace_id);
 
 
 --
@@ -795,6 +937,111 @@ CREATE INDEX index_good_jobs_on_queue_name_and_scheduled_at ON public.good_jobs 
 --
 
 CREATE INDEX index_good_jobs_on_scheduled_at ON public.good_jobs USING btree (scheduled_at) WHERE (finished_at IS NULL);
+
+
+--
+-- Name: index_memory_entries_on_agent_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entries_on_agent_id ON public.memory_entries USING btree (agent_id);
+
+
+--
+-- Name: index_memory_entries_on_embedding; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entries_on_embedding ON public.memory_entries USING hnsw (embedding public.vector_cosine_ops);
+
+
+--
+-- Name: index_memory_entries_on_scope; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entries_on_scope ON public.memory_entries USING btree (workspace_id, agent_id, active);
+
+
+--
+-- Name: index_memory_entries_on_session_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entries_on_session_id ON public.memory_entries USING btree (session_id);
+
+
+--
+-- Name: index_memory_entries_on_source_message_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entries_on_source_message_id ON public.memory_entries USING btree (source_message_id);
+
+
+--
+-- Name: index_memory_entries_on_workspace_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entries_on_workspace_id ON public.memory_entries USING btree (workspace_id);
+
+
+--
+-- Name: index_memory_entries_on_workspace_id_and_active_and_importance; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entries_on_workspace_id_and_active_and_importance ON public.memory_entries USING btree (workspace_id, active, importance);
+
+
+--
+-- Name: index_memory_entries_on_workspace_id_and_fingerprint; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entries_on_workspace_id_and_fingerprint ON public.memory_entries USING btree (workspace_id, fingerprint);
+
+
+--
+-- Name: index_memory_entry_versions_on_editor_agent_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entry_versions_on_editor_agent_id ON public.memory_entry_versions USING btree (editor_agent_id);
+
+
+--
+-- Name: index_memory_entry_versions_on_editor_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entry_versions_on_editor_user_id ON public.memory_entry_versions USING btree (editor_user_id);
+
+
+--
+-- Name: index_memory_entry_versions_on_memory_entry_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entry_versions_on_memory_entry_id ON public.memory_entry_versions USING btree (memory_entry_id);
+
+
+--
+-- Name: index_memory_entry_versions_on_memory_entry_id_and_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entry_versions_on_memory_entry_id_and_created_at ON public.memory_entry_versions USING btree (memory_entry_id, created_at);
+
+
+--
+-- Name: index_memory_entry_versions_on_session_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entry_versions_on_session_id ON public.memory_entry_versions USING btree (session_id);
+
+
+--
+-- Name: index_memory_entry_versions_on_workspace_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entry_versions_on_workspace_id ON public.memory_entry_versions USING btree (workspace_id);
+
+
+--
+-- Name: index_memory_entry_versions_on_workspace_id_and_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entry_versions_on_workspace_id_and_created_at ON public.memory_entry_versions USING btree (workspace_id, created_at);
 
 
 --
@@ -1113,6 +1360,14 @@ CREATE TRIGGER vault_chunks_tsvector_trigger BEFORE INSERT OR UPDATE OF content 
 
 
 --
+-- Name: memory_entries fk_rails_103a322fcb; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memory_entries
+    ADD CONSTRAINT fk_rails_103a322fcb FOREIGN KEY (source_message_id) REFERENCES public.messages(id);
+
+
+--
 -- Name: messages fk_rails_1ee2a92df0; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1126,6 +1381,22 @@ ALTER TABLE ONLY public.messages
 
 ALTER TABLE ONLY public.workspace_memberships
     ADD CONSTRAINT fk_rails_26c4c0bd41 FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
+
+
+--
+-- Name: memory_entry_versions fk_rails_2a2bc810a5; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memory_entry_versions
+    ADD CONSTRAINT fk_rails_2a2bc810a5 FOREIGN KEY (editor_user_id) REFERENCES public.users(id);
+
+
+--
+-- Name: memory_entry_versions fk_rails_3a909d5aee; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memory_entry_versions
+    ADD CONSTRAINT fk_rails_3a909d5aee FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
 
 
 --
@@ -1153,11 +1424,27 @@ ALTER TABLE ONLY public.messages
 
 
 --
+-- Name: memory_entry_versions fk_rails_6181aa80e3; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memory_entry_versions
+    ADD CONSTRAINT fk_rails_6181aa80e3 FOREIGN KEY (editor_agent_id) REFERENCES public.agents(id);
+
+
+--
 -- Name: vault_links fk_rails_62373dcda0; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.vault_links
     ADD CONSTRAINT fk_rails_62373dcda0 FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
+
+
+--
+-- Name: conversation_archives fk_rails_6537030715; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.conversation_archives
+    ADD CONSTRAINT fk_rails_6537030715 FOREIGN KEY (session_id) REFERENCES public.sessions(id);
 
 
 --
@@ -1169,11 +1456,27 @@ ALTER TABLE ONLY public.vault_links
 
 
 --
+-- Name: conversation_archives fk_rails_7fc7f63642; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.conversation_archives
+    ADD CONSTRAINT fk_rails_7fc7f63642 FOREIGN KEY (agent_id) REFERENCES public.agents(id);
+
+
+--
 -- Name: vault_files fk_rails_827af47546; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.vault_files
     ADD CONSTRAINT fk_rails_827af47546 FOREIGN KEY (vault_id) REFERENCES public.vaults(id);
+
+
+--
+-- Name: memory_entry_versions fk_rails_84f6e268a4; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memory_entry_versions
+    ADD CONSTRAINT fk_rails_84f6e268a4 FOREIGN KEY (memory_entry_id) REFERENCES public.memory_entries(id);
 
 
 --
@@ -1190,6 +1493,14 @@ ALTER TABLE ONLY public.sessions
 
 ALTER TABLE ONLY public.vault_chunks
     ADD CONSTRAINT fk_rails_8c1e896a8a FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
+
+
+--
+-- Name: memory_entry_versions fk_rails_945aa32c61; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memory_entry_versions
+    ADD CONSTRAINT fk_rails_945aa32c61 FOREIGN KEY (session_id) REFERENCES public.sessions(id);
 
 
 --
@@ -1217,6 +1528,14 @@ ALTER TABLE ONLY public.sessions
 
 
 --
+-- Name: conversation_archives fk_rails_aa72fc8b11; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.conversation_archives
+    ADD CONSTRAINT fk_rails_aa72fc8b11 FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
+
+
+--
 -- Name: workspace_memberships fk_rails_aca847b4f5; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1238,6 +1557,14 @@ ALTER TABLE ONLY public.messages
 
 ALTER TABLE ONLY public.sessions
     ADD CONSTRAINT fk_rails_beac544c6e FOREIGN KEY (agent_id) REFERENCES public.agents(id);
+
+
+--
+-- Name: memory_entries fk_rails_bef249fe24; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memory_entries
+    ADD CONSTRAINT fk_rails_bef249fe24 FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
 
 
 --
@@ -1265,6 +1592,14 @@ ALTER TABLE ONLY public.vault_chunks
 
 
 --
+-- Name: memory_entries fk_rails_f9a7923575; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memory_entries
+    ADD CONSTRAINT fk_rails_f9a7923575 FOREIGN KEY (session_id) REFERENCES public.sessions(id);
+
+
+--
 -- Name: agents fk_rails_f9d68ffa97; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1273,10 +1608,36 @@ ALTER TABLE ONLY public.agents
 
 
 --
+-- Name: memory_entries fk_rails_ff599837fe; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memory_entries
+    ADD CONSTRAINT fk_rails_ff599837fe FOREIGN KEY (agent_id) REFERENCES public.agents(id);
+
+
+--
 -- Name: agents; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
 ALTER TABLE public.agents ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: conversation_archives; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.conversation_archives ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: memory_entries; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.memory_entries ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: memory_entry_versions; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.memory_entry_versions ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: messages; Type: ROW SECURITY; Schema: public; Owner: -
@@ -1325,6 +1686,27 @@ ALTER TABLE public.vaults ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY workspace_isolation ON public.agents TO app_user USING (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true))) WITH CHECK (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true)));
+
+
+--
+-- Name: conversation_archives workspace_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY workspace_isolation ON public.conversation_archives TO app_user USING (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true))) WITH CHECK (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true)));
+
+
+--
+-- Name: memory_entries workspace_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY workspace_isolation ON public.memory_entries TO app_user USING (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true))) WITH CHECK (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true)));
+
+
+--
+-- Name: memory_entry_versions workspace_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY workspace_isolation ON public.memory_entry_versions TO app_user USING (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true))) WITH CHECK (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true)));
 
 
 --
@@ -1387,6 +1769,10 @@ CREATE POLICY workspace_isolation ON public.vaults TO app_user USING (((workspac
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260401110300'),
+('20260401110200'),
+('20260401110100'),
+('20260401110000'),
 ('20260401100400'),
 ('20260401100300'),
 ('20260401100200'),

@@ -18,11 +18,13 @@ class Session < ApplicationRecord
                model_class: "RubyLLM::ModelRecord"
 
   belongs_to :agent
+  has_one :conversation_archive, dependent: :destroy, inverse_of: :session
   has_many :context_messages,
            -> { active.order(:created_at) },
            class_name: "Message",
            foreign_key: :session_id,
            inverse_of: :session
+  has_many :memory_entries, dependent: :nullify, inverse_of: :session
   has_many :messages,
            -> { order(:created_at) },
            dependent: :destroy,
@@ -34,6 +36,8 @@ class Session < ApplicationRecord
 
   scope :active, -> { where(status: "active") }
   scope :stale, ->(before_time) { active.where("last_activity_at < ?", before_time) }
+
+  after_commit :enqueue_conversation_archive_job, on: :update, if: :archived_now_with_messages?
 
   # Finds or creates the active session for the current workspace.
   #
@@ -115,6 +119,11 @@ class Session < ApplicationRecord
     update!(status: "archived", ended_at: Time.current)
   end
 
+  # @return [Boolean]
+  def archived?
+    status == "archived"
+  end
+
   # Returns whether the session has been idle long enough to rotate.
   # Rotation is intentionally invisible to the user: the old session is archived
   # and a fresh one inherits the summary so the agent still has continuity.
@@ -134,6 +143,15 @@ class Session < ApplicationRecord
   def inactivity_threshold
     hours = normalized_session_timeout_hours
     hours.hours
+  end
+
+  # Merges additional metadata into the session context blob.
+  #
+  # @param updates [Hash]
+  # @return [void]
+  def merge_context_data!(updates)
+    normalized_updates = updates.deep_stringify_keys
+    update!(context_data: (context_data || {}).deep_merge(normalized_updates))
   end
 
   private
@@ -211,5 +229,15 @@ class Session < ApplicationRecord
     return if agent.workspace_id == workspace_id
 
     errors.add(:agent, "must belong to the current workspace")
+  end
+
+  # @return [Boolean]
+  def archived_now_with_messages?
+    saved_change_to_status? && archived? && messages.where(role: %w[user assistant]).exists?
+  end
+
+  # @return [void]
+  def enqueue_conversation_archive_job
+    ConversationArchiveJob.perform_later(id, workspace_id:)
   end
 end

@@ -5,13 +5,17 @@
 # The prompt has three layers of memory:
 # 1. The agent's static instructions from PromptBuilder.
 # 2. The session summary, which represents older compacted history.
-# 3. A short sliding bridge window from the most recently archived session.
+# 3. Structured long-term memory and archive snippets from prior sessions.
+# 4. A short sliding bridge window from the most recently archived session.
 #
 # The bridge is only used for a brand-new rotated session. Once the new session
 # has its own messages, the bridge disappears and the session stands on its own.
 class ContextBuilder
   BRIDGE_MESSAGE_LIMIT = 10
+  KNOWLEDGE_CONTRACT_TITLE = "## Knowledge Contract"
+  LONG_TERM_MEMORY_TITLE = "## Structured Memory"
   PREVIOUS_CONTEXT_TITLE = "## Previous Context"
+  RELEVANT_ARCHIVES_TITLE = "## Relevant Archived Context"
   RECENT_MESSAGES_TITLE = "## Recent Messages (from previous session)"
 
   # @param session [Session]
@@ -26,10 +30,13 @@ class ContextBuilder
   # @return [Hash]
   def build
     prompt_parts = [ PromptBuilder.new(@agent).build ]
+    prompt_parts << knowledge_contract_section
 
     if @session.summary.present?
       prompt_parts << "#{PREVIOUS_CONTEXT_TITLE}\n\n#{@session.summary}"
     end
+
+    prompt_parts << long_term_memory_section
 
     bridge_messages = bridge_messages_context
     prompt_parts << bridge_messages if bridge_messages.present?
@@ -42,6 +49,46 @@ class ContextBuilder
   end
 
   private
+
+  # @return [String]
+  def knowledge_contract_section
+    <<~TEXT.strip
+      #{KNOWLEDGE_CONTRACT_TITLE}
+
+      This workspace has two valid persistent knowledge systems:
+      - Structured memory: curated long-term facts, preferences, rules, and ongoing context stored in the database.
+      - Vault: user-authored documents and files that hold longer-form notes, artifacts, and reference material.
+
+      Treat both as valid context. Use structured memory for durable recall and the vault for richer source material.
+      If the user corrects old information, prefer the newer user statement and update memory accordingly.
+      Use shared memory for user-wide facts and preferences. Use private memory for agent-specific specialist context.
+    TEXT
+  end
+
+  # @return [String, nil]
+  def long_term_memory_section
+    payload = MemoryRetrievalService.new(session: @session).build_context
+    memories = payload[:memories]
+    archives = payload[:archives]
+
+    parts = []
+    if memories.any?
+      memory_lines = memories.map do |entry|
+        scope = entry.shared? ? "shared" : "private:#{entry.agent&.slug || 'agent'}"
+        "[#{scope}] [#{entry.category}] #{entry.content}"
+      end
+      parts << "#{LONG_TERM_MEMORY_TITLE}\n\n#{memory_lines.join("\n")}"
+    end
+
+    if archives.any?
+      archive_lines = archives.map do |archive|
+        "- #{archive.summary}"
+      end
+      parts << "#{RELEVANT_ARCHIVES_TITLE}\n\n#{archive_lines.join("\n")}"
+    end
+
+    parts.compact_blank.join("\n\n").presence
+  end
 
   # Returns summarized bridge messages from the most recently archived session.
   # This behaves like a sliding window: we only take the newest

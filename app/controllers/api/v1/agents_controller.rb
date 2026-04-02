@@ -48,7 +48,8 @@ module Api
       # @return [ActionController::Parameters]
       def agent_params
         params.require(:agent).permit(
-          :name, :model_id, :provider, :temperature, :instructions, :soul,
+          :name, :model_id, :memory_isolation, :provider, :temperature, :instructions, :soul,
+          tool_names: [],
           identity: %w[persona tone constraints],
           thinking: %w[enabled budget_tokens]
         )
@@ -62,6 +63,7 @@ module Api
           slug: agent.slug,
           name: agent.name,
           model_id: agent.model_id,
+          memory_isolation: agent.memory_isolation,
           provider: agent.provider,
           temperature: agent.temperature,
           instructions: agent.instructions,
@@ -69,6 +71,7 @@ module Api
           identity: agent.identity || {},
           params: agent.params || {},
           thinking: agent.thinking || {},
+          tool_names: agent.tool_names || [],
           is_default: agent.is_default,
           active: agent.active
         }

@@ -29,6 +29,15 @@ class AgentRuntime
       runtime_session = runtime_session.with_runtime_instructions(context[:system_prompt])
     end
 
+    if @session.respond_to?(:workspace)
+      tool_user = Current.user
+      if tool_user.blank? && @session.workspace.respond_to?(:owner)
+        tool_user = @session.workspace.owner
+      end
+
+      tools = @agent.tool_instances(user: tool_user, session: @session)
+      runtime_session = runtime_session.with_tools(*tools) if tools.any?
+    end
     runtime_session = runtime_session.with_temperature(@agent.temperature || 0.7)
     runtime_session.ask(user_message, &stream_block)
   end

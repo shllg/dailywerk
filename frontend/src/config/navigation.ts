@@ -42,6 +42,13 @@ export const APP_NAVIGATION: AppNavSection[] = [
     title: 'Knowledge',
     items: [
       {
+        label: 'Memory',
+        path: '/memory',
+        icon: 'agents',
+        description: 'Structured long-term memory, shared/private scopes, and recall debugging.',
+        badge: 'Live',
+      },
+      {
         label: 'Vault',
         path: '/vault',
         icon: 'vault',

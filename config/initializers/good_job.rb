@@ -8,6 +8,16 @@ Rails.application.configure do
       class: "ArchiveStaleSessionsJob",
       description: "Archive sessions inactive for more than 7 days"
     },
+    memory_maintenance: {
+      cron: "15 2 * * *",
+      class: "MemoryMaintenanceJob",
+      description: "Expire and deduplicate structured memories"
+    },
+    memory_reindex_stale: {
+      cron: "*/20 * * * *",
+      class: "MemoryReindexStaleJob",
+      description: "Re-index memories and archives missing embeddings"
+    },
     vault_s3_sync: {
       cron: "*/5 * * * *",
       class: "VaultS3SyncAllJob",

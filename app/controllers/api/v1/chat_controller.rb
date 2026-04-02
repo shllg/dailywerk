@@ -39,7 +39,12 @@ module Api
           return render json: { error: "Content required" }, status: :unprocessable_entity
         end
 
-        ChatStreamJob.perform_later(session.id, content, workspace_id: Current.workspace.id)
+        ChatStreamJob.perform_later(
+          session.id,
+          content,
+          workspace_id: Current.workspace.id,
+          user_id: Current.user.id
+        )
 
         render json: { session_id: session.id }, status: :accepted
       end

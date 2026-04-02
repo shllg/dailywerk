@@ -5,6 +5,9 @@ class Workspace < ApplicationRecord
   belongs_to :owner, class_name: "User", inverse_of: :owned_workspaces
 
   has_many :agents, dependent: :destroy, inverse_of: :workspace
+  has_many :conversation_archives, dependent: :destroy, inverse_of: :workspace
+  has_many :memory_entries, dependent: :destroy, inverse_of: :workspace
+  has_many :memory_entry_versions, dependent: :destroy, inverse_of: :workspace
   has_many :sessions, inverse_of: :workspace
   has_many :messages, inverse_of: :workspace
   has_many :vaults, dependent: :destroy, inverse_of: :workspace

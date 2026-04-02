@@ -13,8 +13,9 @@ class ChatStreamJob < ApplicationJob
   # @param session_id [String]
   # @param user_message [String]
   # @param workspace_id [String]
+  # @param user_id [String, nil]
   # @return [void]
-  def perform(session_id, user_message, workspace_id:)
+  def perform(session_id, user_message, workspace_id:, user_id: nil)
     session = Session.find(session_id)
     assistant_message = nil
 
@@ -43,6 +44,7 @@ class ChatStreamJob < ApplicationJob
     )
 
     update_session_metadata(session, assistant_message)
+    enqueue_memory_extraction(session, assistant_message)
   rescue StandardError => e
     ActionCable.server.broadcast(
       "session_#{session_id}",
@@ -80,5 +82,14 @@ class ChatStreamJob < ApplicationJob
     end
 
     session.update!(updates)
+  end
+
+  # @param session [Session]
+  # @param message [Message, nil]
+  # @return [void]
+  def enqueue_memory_extraction(session, message)
+    return unless message
+
+    MemoryExtractionJob.perform_later(session.id, workspace_id: session.workspace_id)
   end
 end
