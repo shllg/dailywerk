@@ -1,3 +1,8 @@
+---
+name: rails-testing
+description: Quick reference for writing Rails Minitest tests in this codebase, covering workspace helpers, parallel-safe setup, stubbing patterns, service fakes, job tests, and API integration tests.
+---
+
 # Rails Testing Skill
 
 Quick reference for writing tests in this codebase.

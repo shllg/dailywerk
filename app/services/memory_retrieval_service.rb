@@ -156,7 +156,7 @@ class MemoryRetrievalService
   # @param text [String]
   # @return [Integer]
   def estimate_tokens(text)
-    [(text.to_s.length / 4.0).ceil, 1].max
+    [ (text.to_s.length / 4.0).ceil, 1 ].max
   end
 
   # @return [ActiveRecord::Relation]

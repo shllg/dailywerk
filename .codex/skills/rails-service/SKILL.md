@@ -1,3 +1,8 @@
+---
+name: rails-service
+description: Templates and conventions for Rails service objects in this codebase, including when to use services, constructor injection, structured return values, and Minitest patterns with lightweight fakes.
+---
+
 # Rails Service Skill
 
 Copy-paste templates for service objects. Services live in `app/services/`.

@@ -66,6 +66,7 @@ class Api::V1::MemoryEntriesControllerTest < ActionDispatch::IntegrationTest
     assert_response :created
     created_body = JSON.parse(response.body)
     created_id = created_body.dig("entry", "id")
+
     assert_equal "private", created_body.dig("entry", "visibility")
 
     patch "/api/v1/memory/#{created_id}",
@@ -83,6 +84,7 @@ class Api::V1::MemoryEntriesControllerTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     updated_body = JSON.parse(response.body)
+
     assert_equal "shared", updated_body.dig("entry", "visibility")
     assert_nil updated_body.dig("entry", "agent")
 
@@ -92,6 +94,7 @@ class Api::V1::MemoryEntriesControllerTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     destroyed_body = JSON.parse(response.body)
-    assert_equal false, destroyed_body.dig("entry", "active")
+
+    refute destroyed_body.dig("entry", "active")
   end
 end

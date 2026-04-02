@@ -9,8 +9,8 @@ class ToolSchemaTest < ActiveSupport::TestCase
     definition = openai_tool_definition_for(MemoryTool)
     parameters = definition.dig(:function, :parameters)
 
-    assert_equal true, definition.dig(:function, :strict)
-    assert_equal false, parameters["additionalProperties"]
+    assert definition.dig(:function, :strict)
+    refute parameters["additionalProperties"]
     assert_equal(
       parameters["properties"].keys.sort,
       parameters["required"].sort
@@ -22,8 +22,8 @@ class ToolSchemaTest < ActiveSupport::TestCase
     definition = openai_tool_definition_for(VaultTool)
     parameters = definition.dig(:function, :parameters)
 
-    assert_equal true, definition.dig(:function, :strict)
-    assert_equal false, parameters["additionalProperties"]
+    assert definition.dig(:function, :strict)
+    refute parameters["additionalProperties"]
     assert_equal(
       parameters["properties"].keys.sort,
       parameters["required"].sort

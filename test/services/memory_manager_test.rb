@@ -50,7 +50,7 @@ class MemoryManagerTest < ActiveSupport::TestCase
       assert_equal first_entry.id, second_entry.id
       assert_nil second_entry.agent_id
       assert_equal 9, second_entry.importance
-      assert_equal 0.9, second_entry.confidence.to_f
+      assert_in_delta(0.9, second_entry.confidence.to_f)
       assert_equal 2, second_entry.versions.count
     end
   end

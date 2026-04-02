@@ -1,3 +1,8 @@
+---
+name: rails-model
+description: Copy-paste templates and conventions for creating workspace-scoped Rails models, including UUIDv7 migrations, RLS setup, model structure, and matching Minitest coverage in this codebase.
+---
+
 # Rails Model Skill
 
 Copy-paste templates for creating a workspace-scoped model. Adapt names as needed.

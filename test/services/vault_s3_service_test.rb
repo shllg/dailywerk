@@ -17,7 +17,7 @@ class VaultS3ServiceTest < ActiveSupport::TestCase
       service = VaultS3Service.new(vault)
 
       assert_instance_of Aws::S3::Client, service.instance_variable_get(:@client)
-      assert_equal false, service.send(:s3_config)[:require_https_for_sse_cpk]
+      refute service.send(:s3_config)[:require_https_for_sse_cpk]
     end
   end
 end

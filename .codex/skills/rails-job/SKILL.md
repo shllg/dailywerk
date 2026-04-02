@@ -1,3 +1,8 @@
+---
+name: rails-job
+description: Templates and conventions for Rails background jobs in this codebase, including GoodJob external mode, workspace-scoped jobs, concurrency controls, cron jobs, and enqueue patterns.
+---
+
 # Rails Job Skill
 
 Copy-paste templates for background jobs. Jobs live in `app/jobs/`.

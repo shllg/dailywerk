@@ -24,7 +24,7 @@ class MemoryExtractionService
         }
       }
     },
-    required: ["memories"],
+    required: [ "memories" ],
     additionalProperties: false
   }.freeze
   DEFAULT_MODEL = "gpt-4o-mini"
