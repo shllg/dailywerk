@@ -27,16 +27,12 @@ class Api::V1::MemoryEntriesControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "index lists workspace memory entries" do
-    with_current_workspace(@workspace, user: @user) do
-      @workspace.memory_entries.create!(
-        workspace: @workspace,
-        category: "preference",
-        content: "User prefers concise answers.",
-        source: "manual",
-        importance: 7,
-        confidence: 0.8
-      )
-    end
+    create_memory_entry!(
+      category: "preference",
+      content: "User prefers concise answers.",
+      importance: 7,
+      confidence: 0.8
+    )
 
     get "/api/v1/memory", headers: api_auth_headers(user: @user, workspace: @workspace)
 
@@ -45,10 +41,18 @@ class Api::V1::MemoryEntriesControllerTest < ActionDispatch::IntegrationTest
 
     assert_equal 1, body["entries"].length
     assert_equal "preference", body["entries"].first["category"]
+  end
+
+  test "index lists active agent scopes" do
+    get "/api/v1/memory", headers: api_auth_headers(user: @user, workspace: @workspace)
+
+    assert_response :success
+    body = JSON.parse(response.body)
+
     assert_equal @agent.id, body["agents"].first["id"]
   end
 
-  test "create update and destroy manage structured memory entries" do
+  test "create persists a private memory entry" do
     post "/api/v1/memory",
          params: {
            memory_entry: {
@@ -64,12 +68,22 @@ class Api::V1::MemoryEntriesControllerTest < ActionDispatch::IntegrationTest
          headers: api_auth_headers(user: @user, workspace: @workspace)
 
     assert_response :created
-    created_body = JSON.parse(response.body)
-    created_id = created_body.dig("entry", "id")
+    body = JSON.parse(response.body)
 
-    assert_equal "private", created_body.dig("entry", "visibility")
+    assert_equal "private", body.dig("entry", "visibility")
+    assert_equal @agent.id, body.dig("entry", "agent", "id")
+  end
 
-    patch "/api/v1/memory/#{created_id}",
+  test "update can move a private memory entry to shared scope" do
+    entry = create_memory_entry!(
+      agent: @agent,
+      category: "preference",
+      content: "User prefers detailed test output.",
+      importance: 8,
+      confidence: 0.9
+    )
+
+    patch "/api/v1/memory/#{entry.id}",
           params: {
             memory_entry: {
               content: "User prefers detailed test output with file references.",
@@ -83,18 +97,44 @@ class Api::V1::MemoryEntriesControllerTest < ActionDispatch::IntegrationTest
           headers: api_auth_headers(user: @user, workspace: @workspace)
 
     assert_response :success
-    updated_body = JSON.parse(response.body)
+    body = JSON.parse(response.body)
 
-    assert_equal "shared", updated_body.dig("entry", "visibility")
-    assert_nil updated_body.dig("entry", "agent")
+    assert_equal "shared", body.dig("entry", "visibility")
+    assert_nil body.dig("entry", "agent")
+  end
 
-    delete "/api/v1/memory/#{created_id}",
+  test "destroy deactivates a memory entry" do
+    entry = create_memory_entry!(
+      agent: @agent,
+      category: "preference",
+      content: "User prefers detailed test output.",
+      importance: 8,
+      confidence: 0.9
+    )
+
+    delete "/api/v1/memory/#{entry.id}",
            as: :json,
            headers: api_auth_headers(user: @user, workspace: @workspace)
 
     assert_response :success
-    destroyed_body = JSON.parse(response.body)
+    body = JSON.parse(response.body)
 
-    refute destroyed_body.dig("entry", "active")
+    refute body.dig("entry", "active")
+  end
+
+  private
+
+  def create_memory_entry!(attributes = {})
+    with_current_workspace(@workspace, user: @user) do
+      @workspace.memory_entries.create!(
+        {
+          category: "preference",
+          content: "User prefers concise answers.",
+          source: "manual",
+          importance: 7,
+          confidence: 0.8
+        }.merge(attributes)
+      )
+    end
   end
 end

@@ -5,29 +5,49 @@ require "test_helper"
 class ToolSchemaTest < ActiveSupport::TestCase
   FakeSession = Struct.new(:workspace, :agent, keyword_init: true)
 
-  test "memory tool exposes a strict-compatible OpenAI schema" do
+  test "memory tool schema is strict and closed" do
     definition = openai_tool_definition_for(MemoryTool)
     parameters = definition.dig(:function, :parameters)
 
     assert definition.dig(:function, :strict)
     refute parameters["additionalProperties"]
+  end
+
+  test "memory tool schema requires every declared property" do
+    parameters = openai_tool_definition_for(MemoryTool).dig(:function, :parameters)
+
     assert_equal(
       parameters["properties"].keys.sort,
       parameters["required"].sort
     )
+  end
+
+  test "memory tool schema allows null content" do
+    parameters = openai_tool_definition_for(MemoryTool).dig(:function, :parameters)
+
     assert_equal "null", parameters.dig("properties", "content", "anyOf", 1, "type")
   end
 
-  test "vault tool exposes a strict-compatible OpenAI schema" do
+  test "vault tool schema is strict and closed" do
     definition = openai_tool_definition_for(VaultTool)
     parameters = definition.dig(:function, :parameters)
 
     assert definition.dig(:function, :strict)
     refute parameters["additionalProperties"]
+  end
+
+  test "vault tool schema requires every declared property" do
+    parameters = openai_tool_definition_for(VaultTool).dig(:function, :parameters)
+
     assert_equal(
       parameters["properties"].keys.sort,
       parameters["required"].sort
     )
+  end
+
+  test "vault tool schema allows null path" do
+    parameters = openai_tool_definition_for(VaultTool).dig(:function, :parameters)
+
     assert_equal "null", parameters.dig("properties", "path", "anyOf", 1, "type")
   end
 

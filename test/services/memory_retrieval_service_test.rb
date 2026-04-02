@@ -4,6 +4,24 @@ require "test_helper"
 
 class MemoryRetrievalServiceTest < ActiveSupport::TestCase
   test "build_context returns only shared and same-agent memories" do
+    payload = build_context_for_shared_and_agent_memories
+    memory_contents = payload[:memories].map(&:content)
+
+    assert_includes memory_contents, "User prefers tea over coffee."
+    assert_includes memory_contents, "Primary agent tracks the weekly tea planning context."
+    refute_includes memory_contents, "Other agent private memory about tea."
+  end
+
+  test "build_context marks returned memories as accessed" do
+    payload = build_context_for_shared_and_agent_memories
+
+    assert_equal 2, payload[:memories].size
+    assert payload[:memories].all? { |entry| entry.reload.access_count.positive? }
+  end
+
+  private
+
+  def build_context_for_shared_and_agent_memories
     user, workspace = create_user_with_workspace
 
     with_current_workspace(workspace, user:) do
@@ -52,13 +70,7 @@ class MemoryRetrievalServiceTest < ActiveSupport::TestCase
         active: true
       )
 
-      payload = MemoryRetrievalService.new(session:).build_context
-      memory_contents = payload[:memories].map(&:content)
-
-      assert_includes memory_contents, "User prefers tea over coffee."
-      assert_includes memory_contents, "Primary agent tracks the weekly tea planning context."
-      refute_includes memory_contents, "Other agent private memory about tea."
-      assert payload[:memories].all? { |entry| entry.reload.access_count.positive? }
+      MemoryRetrievalService.new(session:).build_context
     end
   end
 end
