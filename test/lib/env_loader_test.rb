@@ -59,7 +59,34 @@ class EnvLoaderTest < ActiveSupport::TestCase
     end
   end
 
+  test "is a no-op when dotenv is unavailable" do
+    with_temp_env_files(
+      ".env" => "PORT=3000\n",
+      ".env.worktree" => "PORT=4100\n"
+    ) do |root|
+      env = {}
+
+      with_dotenv_available(false) do
+        EnvLoader.load!(root:, env:)
+
+        assert_equal({}, env)
+        assert_equal "", EnvLoader.shell_exports(root:, env: {})
+      end
+    end
+  end
+
   private
+
+  def with_dotenv_available(value)
+    original_value = EnvLoader::DOTENV_AVAILABLE
+    EnvLoader.send(:remove_const, :DOTENV_AVAILABLE)
+    EnvLoader.const_set(:DOTENV_AVAILABLE, value)
+
+    yield
+  ensure
+    EnvLoader.send(:remove_const, :DOTENV_AVAILABLE)
+    EnvLoader.const_set(:DOTENV_AVAILABLE, original_value)
+  end
 
   def with_temp_env_files(files)
     Dir.mktmpdir do |root|

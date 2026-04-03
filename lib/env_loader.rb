@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
-require "dotenv"
+begin
+  require "dotenv"
+rescue LoadError
+  # dotenv is only installed in development-like environments.
+end
 require "set"
 require "shellwords"
 
@@ -9,6 +13,7 @@ module EnvLoader
   module_function
 
   ENV_FILENAMES = %w[.env .env.worktree].freeze
+  DOTENV_AVAILABLE = defined?(Dotenv::Parser)
 
   # Loads `.env` first and `.env.worktree` second without clobbering process env.
   #
@@ -28,6 +33,8 @@ module EnvLoader
   end
 
   def merged_values(root:, env:)
+    return {} unless DOTENV_AVAILABLE
+
     original_keys = env.keys.to_set
     loaded_values = {}
 
