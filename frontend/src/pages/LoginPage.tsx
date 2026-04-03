@@ -1,5 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
+
+type ReadyResponse = {
+  build_ref?: string | null
+  build_sha?: string | null
+}
+
+function formatBuildLabel(payload: ReadyResponse | null) {
+  if (!payload) return 'Build info unavailable'
+
+  const ref = payload.build_ref?.trim() || 'unknown'
+  const sha = payload.build_sha?.trim()
+
+  if (!sha) return `Build ${ref}`
+
+  return `Build ${ref} - ${sha.slice(0, 7)}`
+}
 
 export function LoginPage() {
   // ============================================================
@@ -12,6 +28,32 @@ export function LoginPage() {
   const [email, setEmail] = useState('sascha@dailywerk.com')
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [buildLabel, setBuildLabel] = useState('Loading build info...')
+
+  useEffect(() => {
+    let isActive = true
+
+    void fetch('/ready')
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+
+        return (await response.json()) as ReadyResponse
+      })
+      .then((payload) => {
+        if (!isActive) return
+        setBuildLabel(formatBuildLabel(payload))
+      })
+      .catch(() => {
+        if (!isActive) return
+        setBuildLabel(formatBuildLabel(null))
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [])
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -88,6 +130,10 @@ export function LoginPage() {
               >
                 {isSubmitting ? 'Signing In...' : 'Sign In (Dev)'}
               </button>
+
+              <p className="text-center text-xs tracking-[0.2em] text-gray-500 uppercase">
+                {buildLabel}
+              </p>
             </form>
           </section>
         </div>

@@ -23,7 +23,19 @@ describe('App', () => {
     localStorage.clear()
   })
 
-  it('renders the development login page when unauthenticated', () => {
+  it('renders the development login page when unauthenticated', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          build_ref: 'main',
+          build_sha: 'abcdef1234567890',
+        }),
+      }),
+    )
+
     render(<App />)
 
     expect(screen.getByText('DailyWerk')).toBeInTheDocument()
@@ -31,6 +43,10 @@ describe('App', () => {
     expect(
       screen.getByDisplayValue('sascha@dailywerk.com'),
     ).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(screen.getByText('Build main - abcdef1')).toBeInTheDocument()
+    })
   })
 
   it('renders the single chat view when a session is stored', async () => {
