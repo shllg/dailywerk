@@ -4,6 +4,10 @@ set -e
 echo "== Installing Ruby dependencies =="
 bundle check || bundle install
 
+if [ -x ./bin/load-env ]; then
+  eval "$(./bin/load-env)"
+fi
+
 if ! command -v overmind >/dev/null 2>&1; then
   echo ""
   echo "== Installing overmind (process manager) =="

@@ -72,7 +72,10 @@ class SessionTest < ActiveSupport::TestCase
       session.messages.create!(role: "assistant", content: "Hide me", compacted: true)
 
       assert_equal [ active_message.id ], session.context_messages.pluck(:id)
-      assert_equal [ "Keep me" ], session.to_llm.messages.map(&:content)
+
+      with_openai_api_key do
+        assert_equal [ "Keep me" ], session.to_llm.messages.map(&:content)
+      end
     end
   end
 

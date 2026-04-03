@@ -4,8 +4,15 @@ require "rails/test_help"
 
 module ActiveSupport
   class TestCase
-    # Run tests in parallel with specified workers
-    parallelize(workers: :number_of_processors)
+    parallel_workers = ENV["PARALLEL_WORKERS"].presence
+    parallel_threshold = ENV["PARALLELIZE_THRESHOLD"].presence
+
+    # Run tests in parallel with a tunable threshold so opt-in integration
+    # suites can force parallel execution without changing the default suite.
+    parallelize(
+      workers: parallel_workers ? parallel_workers.to_i : :number_of_processors,
+      threshold: parallel_threshold ? parallel_threshold.to_i : 50
+    )
 
     # Setup all fixtures in test/fixtures/*.yml for all tests in alphabetical order.
     fixtures :all
@@ -41,6 +48,31 @@ module ActiveSupport
       )
 
       { "Authorization" => "Bearer #{token}" }
+    end
+
+    def with_env(overrides)
+      previous_values = overrides.to_h do |key, _value|
+        [ key, ENV.key?(key) ? ENV[key] : :__missing__ ]
+      end
+
+      overrides.each do |key, value|
+        value.nil? ? ENV.delete(key) : ENV[key] = value
+      end
+
+      yield
+    ensure
+      previous_values.each do |key, value|
+        value == :__missing__ ? ENV.delete(key) : ENV[key] = value
+      end
+    end
+
+    def with_openai_api_key(value: "test-openai-key")
+      original_openai_api_key = RubyLLM.config.openai_api_key
+      RubyLLM.config.openai_api_key = value
+
+      yield
+    ensure
+      RubyLLM.config.openai_api_key = original_openai_api_key
     end
 
     def with_stubbed_ruby_llm_embed(value: 0.1, default_dimensions: 1536)

@@ -19,6 +19,13 @@ No RSpec. No FactoryBot. No mocking gems. Minitest only.
 
 Tests run in parallel (`parallelize(workers: :number_of_processors)`) — all setup must be parallel-safe.
 
+## Default vs Live LLM Suites
+
+- Run `bin/test` for the default hermetic Ruby suite.
+- Put live provider coverage in `test/llm_integration/` and run it with `bin/test-llm`.
+- Gate live tests with `RUN_LIVE_LLM_TESTS=1` plus the relevant provider key.
+- Keep live LLM tests scarce, small, and end-to-end. Do not use them inflationarily when a normal unit/service/job test covers the behavior.
+
 ## Essential Setup
 
 ```ruby
@@ -183,3 +190,5 @@ class SomeTest < ActiveSupport::TestCase
 end
 # rubocop:enable Minitest/MultipleAssertions
 ```
+
+For live LLM coverage, subclass `LlmIntegrationTestCase` from `test/llm_integration/` so the test is skipped unless the live suite is explicitly enabled.

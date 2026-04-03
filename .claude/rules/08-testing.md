@@ -14,10 +14,23 @@ Minitest only. No RSpec. No FactoryBot. No fixture YAML files.
 Parallel execution is enabled globally in `test/test_helper.rb`:
 
 ```ruby
-parallelize(workers: :number_of_processors)
+parallelize(workers: :number_of_processors, threshold: 50)
 ```
 
 All test setup must be safe to run across multiple parallel workers.
+
+## Default vs Live LLM Suites
+
+The default Ruby suite is `bin/test`. It is the hermetic suite that CI runs by default and it must not depend on live provider credentials or network calls.
+
+Live provider coverage belongs in `test/llm_integration/` and runs through `bin/test-llm`. That suite is opt-in and gated by `RUN_LIVE_LLM_TESTS=1` plus the relevant provider key such as `OPENAI_API_KEY`.
+
+Treat live LLM tests as scarce smoke tests, not normal coverage:
+
+- Prefer ordinary model/service/job tests for local logic.
+- Add a live LLM test only when you need to verify provider wiring, SDK compatibility, or a critical request/response path end-to-end.
+- Keep requests tiny and assertions structural.
+- Do not add live LLM tests inflationarily.
 
 ## Record Creation
 
@@ -152,6 +165,7 @@ end
 - **MUST** use `SecureRandom.hex(4)` in slugs and emails to prevent parallel-worker uniqueness conflicts
 - **MUST** restore stubbed methods in `ensure` blocks, never rely on test teardown alone
 - **MUST** include `ActiveJob::TestHelper`, set `queue_adapter = :test` in setup, and clear jobs in teardown for any job test
+- **MUST** keep `bin/test` hermetic and move any live provider checks into `test/llm_integration/`
 
 ## NEVER Rules
 
@@ -159,3 +173,4 @@ end
 - **NEVER** set `Current.user` or `Current.workspace` directly without restoring — always use `with_current_workspace`
 - **NEVER** use hardcoded emails or slugs in tests that run in parallel — always suffix with `SecureRandom.hex(4)`
 - **NEVER** leave stubs in place after a test — always restore the original method in `ensure`
+- **NEVER** add live LLM tests to the default suite or use them inflationarily for behavior that hermetic tests already cover

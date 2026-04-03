@@ -3,15 +3,6 @@
 require "test_helper"
 
 class ReadyControllerTest < ActionDispatch::IntegrationTest
-  setup do
-    @previous_valkey_url = ENV["VALKEY_URL"]
-    ENV["VALKEY_URL"] = "redis://localhost:6399/0"
-  end
-
-  teardown do
-    ENV["VALKEY_URL"] = @previous_valkey_url
-  end
-
   test "returns ok status when dependencies are healthy" do
     get "/ready"
 
@@ -34,9 +25,9 @@ class ReadyControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "returns service unavailable when valkey check fails" do
-    ENV["VALKEY_URL"] = "redis://127.0.0.1:1/0"
-
-    get "/ready"
+    with_env("VALKEY_URL" => "redis://127.0.0.1:1/0") do
+      get "/ready"
+    end
 
     assert_response :service_unavailable
 

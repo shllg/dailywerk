@@ -29,3 +29,7 @@
 
 # obsidian
 docs/.obsidian
+
+# Ignore key files for decrypting credentials and more.
+/config/credentials/*.key
+

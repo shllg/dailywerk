@@ -34,9 +34,9 @@ Those live in the sibling Manual Setup and Server Automation RFCs.
 
 ## 1. Environment Contract
 
-### 1.1 `.env.example`
+### 1.1 `.env.tpl`
 
-The repo should document the runtime contract for containerized deploys.
+The repo should document the runtime contract for containerized deploys in the canonical `.env.tpl`.
 
 Required environment variables:
 
@@ -295,7 +295,7 @@ The deploy-listener (or a pre-start script) must:
 3. render the `.env` file for the app slot being deployed
 4. pass the env file to Docker Compose
 
-This replaces static `.env` files on the server. The `.env.example` in the repo documents the expected shape, but production values never live on disk outside of container runtime.
+This replaces static `.env` files on the server. The `.env.tpl` in the repo documents the expected shape, but production values never live on disk outside of container runtime.
 
 ### 8.3 1Password CLI
 
@@ -371,7 +371,7 @@ The implementation checklist below includes a line item for each required runboo
 
 ## 11. Implementation Checklist
 
-1. [ ] add `.env.example` for the container runtime contract
+1. [ ] keep `.env.tpl` as the single container runtime contract
 2. [ ] switch production cache/cable settings to `VALKEY_URL`
 3. [ ] enable stdout-first structured logging
 4. [ ] add `/ready` endpoint for blue/green slot cutover

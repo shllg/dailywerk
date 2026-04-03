@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
-# Load worktree overrides if present (ports, DB, Valkey, etc.)
-if [ -f .env.worktree ]; then
-  set -a
-  source .env.worktree
-  set +a
+if [ -x ./bin/load-env ]; then
+  eval "$(./bin/load-env)"
 fi
 
 # Defaults

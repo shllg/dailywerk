@@ -1,0 +1,7 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "bundler/setup"
+require_relative "../lib/env_loader"
+
+print EnvLoader.shell_exports(root: File.expand_path("..", __dir__))
