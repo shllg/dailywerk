@@ -15,7 +15,7 @@ module Api
         assert_equal "ok", json["status"]
       end
 
-      test "returns version info" do
+      test "returns runtime version info" do
         get api_v1_health_url
 
         json = JSON.parse(response.body)
@@ -23,6 +23,13 @@ module Api
         assert_predicate json["timestamp"], :present?
         assert_predicate json["version"], :present?
         assert_predicate json["ruby"], :present?
+      end
+
+      test "returns build metadata keys" do
+        get api_v1_health_url
+
+        json = JSON.parse(response.body)
+
         assert_includes json.keys, "build_sha"
         assert_includes json.keys, "build_ref"
       end
