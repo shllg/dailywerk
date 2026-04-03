@@ -23,6 +23,8 @@ module Api
         assert_predicate json["timestamp"], :present?
         assert_predicate json["version"], :present?
         assert_predicate json["ruby"], :present?
+        assert_includes json.keys, "build_sha"
+        assert_includes json.keys, "build_ref"
       end
     end
   end

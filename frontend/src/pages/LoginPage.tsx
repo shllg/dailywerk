@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 
-type ReadyResponse = {
+type HealthResponse = {
   build_ref?: string | null
   build_sha?: string | null
 }
 
-function formatBuildLabel(payload: ReadyResponse | null) {
+function formatBuildLabel(payload: HealthResponse | null) {
   if (!payload) return 'Build info unavailable'
 
   const ref = payload.build_ref?.trim() || 'unknown'
@@ -33,13 +33,13 @@ export function LoginPage() {
   useEffect(() => {
     let isActive = true
 
-    void fetch('/ready')
+    void fetch('/api/v1/health')
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`)
         }
 
-        return (await response.json()) as ReadyResponse
+        return (await response.json()) as HealthResponse
       })
       .then((payload) => {
         if (!isActive) return

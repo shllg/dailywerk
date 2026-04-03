@@ -12,7 +12,9 @@ module Api
           status: "ok",
           timestamp: Time.current.iso8601,
           version: Rails.version,
-          ruby: RUBY_VERSION
+          ruby: RUBY_VERSION,
+          build_sha: ENV["BUILD_SHA"],
+          build_ref: ENV["BUILD_REF"]
         }
       end
     end

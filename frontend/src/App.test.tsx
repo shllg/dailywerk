@@ -24,17 +24,16 @@ describe('App', () => {
   })
 
   it('renders the development login page when unauthenticated', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          build_ref: 'main',
-          build_sha: 'abcdef1234567890',
-        }),
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        build_ref: 'main',
+        build_sha: 'abcdef1234567890',
       }),
-    )
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
 
     render(<App />)
 
@@ -47,6 +46,8 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText('Build main - abcdef1')).toBeInTheDocument()
     })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/health')
   })
 
   it('renders the single chat view when a session is stored', async () => {
