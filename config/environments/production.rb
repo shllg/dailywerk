@@ -94,4 +94,7 @@ Rails.application.configure do
   config.active_record.attributes_for_inspect = [ :id ]
 
   config.hosts = [ ENV["APP_HOST"] ].compact_blank
+  config.host_authorization = {
+    exclude: ->(request) { request.path == "/ready" || request.path == "/metrics" }
+  }
 end
