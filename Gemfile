@@ -21,7 +21,7 @@ gem "rack-cors"
 gem "aws-sdk-s3", require: false
 gem "image_processing", "~> 1.2"
 gem "marcel", "~> 1.0"
-gem "neighbor", "~> 0.5"
+gem "neighbor", "~> 1.0"
 gem "rb-inotify", "~> 0.11"
 gem "ruby_llm", "~> 1.14"
 gem "ruby_llm-responses_api", "~> 0.5"
