@@ -52,7 +52,7 @@ AWS_REGION=us-east-1
 AWS_FORCE_PATH_STYLE=true
 S3_BUCKET=dailywerk-dev
 S3_REQUIRE_HTTPS_FOR_SSE_CPK=false
-VAULT_LOCAL_BASE=/data/workspaces
+VAULT_LOCAL_BASE=/data/orkspaces
 DAILYWERK_S3_PORT=9002
 RUSTFS_ENDPOINT=http://localhost:9002
 RUSTFS_ACCESS_KEY=rustfsadmin
@@ -73,8 +73,9 @@ VITE_PORT=5173
 VITE_API_PORT=3000
 
 # Third-party auth / billing / AI
-# WORKOS_API_KEY=         — op inject or manual
-# WORKOS_CLIENT_ID=       — op inject or manual
+WORKOS_API_KEY=op://DailyWerk/dailywerk-dev-env/workos-api-key
+WORKOS_CLIENT_ID=op://DailyWerk/dailywerk-dev-env/workos-client-id
+WORKOS_WEBHOOK_SECRET=op://DailyWerk/dailywerk-dev-env/workos-webhook-secret
 # STRIPE_SECRET_KEY=      — op inject or manual
 # STRIPE_WEBHOOK_SECRET=  — op inject or manual
 # STRIPE_PUBLISHABLE_KEY= — op inject or manual
