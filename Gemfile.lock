@@ -178,6 +178,7 @@ GEM
       dotenv (= 3.2.0)
       railties (>= 6.1)
     drb (2.2.3)
+    encryptor (3.0.0)
     erb (6.0.2)
     erubi (1.13.1)
     et-orbi (1.4.0)
@@ -255,6 +256,8 @@ GEM
       reline (>= 0.4.2)
     jmespath (1.6.2)
     json (2.19.3)
+    jwt (2.10.2)
+      base64
     language_server-protocol (3.17.0.5)
     lint_roller (1.1.0)
     live (0.18.0)
@@ -476,6 +479,9 @@ GEM
       base64
       websocket-extensions (>= 0.1.0)
     websocket-extensions (0.1.5)
+    workos (5.31.1)
+      encryptor (~> 3.0)
+      jwt (~> 2.8)
     xrb (0.11.2)
     zeitwerk (2.7.5)
 
@@ -502,6 +508,7 @@ DEPENDENCIES
   falcon-rails
   good_job
   image_processing (~> 1.2)
+  jwt (~> 2.9)
   marcel (~> 1.0)
   neighbor (~> 0.5)
   pg (~> 1.1)
@@ -515,6 +522,7 @@ DEPENDENCIES
   ruby_llm-responses_api (~> 0.5)
   strong_migrations
   tzinfo-data
+  workos (~> 5.0)
 
 CHECKSUMS
   action_text-trix (2.1.18) sha256=3fdb83f8bff4145d098be283cdd47ac41caf5110bfa6df4695ed7127d7fb3642
@@ -565,6 +573,7 @@ CHECKSUMS
   dotenv (3.2.0) sha256=e375b83121ea7ca4ce20f214740076129ab8514cd81378161f11c03853fe619d
   dotenv-rails (3.2.0) sha256=657e25554ba622ffc95d8c4f1670286510f47f2edda9f68293c3f661b303beab
   drb (2.2.3) sha256=0b00d6fdb50995fe4a45dea13663493c841112e4068656854646f418fda13373
+  encryptor (3.0.0) sha256=abf23f94ab4d864b8cea85b43f3432044a60001982cda7c33c1cd90da8db1969
   erb (6.0.2) sha256=9fe6264d44f79422c87490a1558479bd0e7dad4dd0e317656e67ea3077b5242b
   erubi (1.13.1) sha256=a082103b0885dbc5ecf1172fede897f9ebdb745a4b97a5e8dc63953db1ee4ad9
   et-orbi (1.4.0) sha256=6c7e3c90779821f9e3b324c5e96fda9767f72995d6ae435b96678a4f3e2de8bc
@@ -598,6 +607,7 @@ CHECKSUMS
   irb (1.17.0) sha256=168c4ddb93d8a361a045c41d92b2952c7a118fa73f23fe14e55609eb7a863aae
   jmespath (1.6.2) sha256=238d774a58723d6c090494c8879b5e9918c19485f7e840f2c1c7532cf84ebcb1
   json (2.19.3) sha256=289b0bb53052a1fa8c34ab33cc750b659ba14a5c45f3fcf4b18762dc67c78646
+  jwt (2.10.2) sha256=31e1ee46f7359883d5e622446969fe9c118c3da87a0b1dca765ce269c3a0c4f4
   language_server-protocol (3.17.0.5) sha256=fd1e39a51a28bf3eec959379985a72e296e9f9acfce46f6a79d31ca8760803cc
   lint_roller (1.1.0) sha256=2c0c845b632a7d172cb849cc90c1bce937a28c5c8ccccb50dfd46a485003cc87
   live (0.18.0) sha256=0ee51e74a4c83b7b6ebc62faaa2ed36ae20d99e32d846671a269716cb9a37aa4
@@ -695,6 +705,7 @@ CHECKSUMS
   useragent (0.16.11) sha256=700e6413ad4bb954bb63547fa098dddf7b0ebe75b40cc6f93b8d54255b173844
   websocket-driver (0.8.0) sha256=ed0dba4b943c22f17f9a734817e808bc84cdce6a7e22045f5315aa57676d4962
   websocket-extensions (0.1.5) sha256=1c6ba63092cda343eb53fc657110c71c754c56484aad42578495227d717a8241
+  workos (5.31.1) sha256=41e14685f421274fdd47aa511647a73aded39d84d2a01ed324199f4da342f824
   xrb (0.11.2) sha256=1e682acd8b7b58bbe3dc3dd0e5d3c1a6dbc7ff67d009abc50d94fac43b9f0870
   zeitwerk (2.7.5) sha256=d8da92128c09ea6ec62c949011b00ed4a20242b255293dd66bf41545398f73dd
 

@@ -438,6 +438,24 @@ ALTER TABLE ONLY public.user_profiles FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: user_sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_sessions (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    user_id uuid NOT NULL,
+    refresh_token text,
+    workos_session_id character varying,
+    expires_at timestamp(6) without time zone NOT NULL,
+    revoked_at timestamp(6) without time zone,
+    ip_address character varying,
+    user_agent character varying,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
 -- Name: users; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -569,7 +587,8 @@ CREATE TABLE public.workspaces (
     owner_id uuid NOT NULL,
     settings jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp(6) without time zone NOT NULL,
-    updated_at timestamp(6) without time zone NOT NULL
+    updated_at timestamp(6) without time zone NOT NULL,
+    workos_organization_id character varying
 );
 
 
@@ -699,6 +718,14 @@ ALTER TABLE ONLY public.tool_calls
 
 ALTER TABLE ONLY public.user_profiles
     ADD CONSTRAINT user_profiles_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_sessions user_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_sessions
+    ADD CONSTRAINT user_sessions_pkey PRIMARY KEY (id);
 
 
 --
@@ -1227,6 +1254,20 @@ CREATE INDEX index_user_profiles_on_workspace_id ON public.user_profiles USING b
 
 
 --
+-- Name: index_user_sessions_on_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_user_sessions_on_user_id ON public.user_sessions USING btree (user_id);
+
+
+--
+-- Name: index_user_sessions_on_workos_session_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_user_sessions_on_workos_session_id ON public.user_sessions USING btree (workos_session_id) WHERE (workos_session_id IS NOT NULL);
+
+
+--
 -- Name: index_users_on_email; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1409,6 +1450,13 @@ CREATE INDEX index_workspaces_on_owner_id ON public.workspaces USING btree (owne
 
 
 --
+-- Name: index_workspaces_on_workos_organization_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_workspaces_on_workos_organization_id ON public.workspaces USING btree (workos_organization_id) WHERE (workos_organization_id IS NOT NULL);
+
+
+--
 -- Name: vault_chunks vault_chunks_tsvector_trigger; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -1581,6 +1629,14 @@ ALTER TABLE ONLY public.memory_entry_versions
 
 ALTER TABLE ONLY public.tool_calls
     ADD CONSTRAINT fk_rails_9c8daee481 FOREIGN KEY (message_id) REFERENCES public.messages(id);
+
+
+--
+-- Name: user_sessions fk_rails_9fa262d742; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_sessions
+    ADD CONSTRAINT fk_rails_9fa262d742 FOREIGN KEY (user_id) REFERENCES public.users(id);
 
 
 --
@@ -1854,6 +1910,8 @@ CREATE POLICY workspace_isolation ON public.vaults TO app_user USING (((workspac
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260407000200'),
+('20260407000100'),
 ('20260406203944'),
 ('20260406203758'),
 ('20260401110300'),

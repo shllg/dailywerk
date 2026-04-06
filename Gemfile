@@ -26,6 +26,10 @@ gem "rb-inotify", "~> 0.11"
 gem "ruby_llm", "~> 1.14"
 gem "ruby_llm-responses_api", "~> 0.5"
 
+# Authentication
+gem "workos", "~> 5.0"
+gem "jwt", "~> 2.9"
+
 gem "tzinfo-data", platforms: %i[windows jruby]
 gem "bootsnap", require: false
 

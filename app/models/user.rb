@@ -2,6 +2,9 @@
 
 # Stores a person's identity and workspace memberships.
 class User < ApplicationRecord
+  attr_readonly :workos_id
+
+  has_many :user_sessions, dependent: :destroy, inverse_of: :user
   has_many :user_profiles, dependent: :destroy, inverse_of: :user
   has_many :workspace_memberships, dependent: :destroy, inverse_of: :user
   has_many :workspaces, through: :workspace_memberships
