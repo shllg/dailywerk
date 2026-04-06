@@ -35,7 +35,7 @@ class MemoryExtractionJob < ApplicationJob
     )
 
     extracted.each do |memory|
-      manager.store(
+      entry = manager.store(
         content: memory[:content],
         category: memory[:category],
         importance: memory[:importance],
@@ -47,6 +47,8 @@ class MemoryExtractionJob < ApplicationJob
         },
         source_message: messages.last
       )
+
+      auto_promote(entry) if entry.staged? && memory[:importance] >= 8
     end
 
     session.merge_context_data!(
@@ -55,6 +57,14 @@ class MemoryExtractionJob < ApplicationJob
   end
 
   private
+
+  # Auto-promotes high-importance memories so they are visible immediately.
+  #
+  # @param entry [MemoryEntry]
+  # @return [void]
+  def auto_promote(entry)
+    entry.update_columns(staged: false, promoted_at: Time.current)
+  end
 
   # @param session [Session]
   # @return [Array<Message>]

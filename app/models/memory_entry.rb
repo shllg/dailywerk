@@ -45,6 +45,8 @@ class MemoryEntry < ApplicationRecord
 
   scope :active, -> { where(active: true) }
   scope :inactive, -> { where(active: false) }
+  scope :promoted, -> { where(staged: false) }
+  scope :staged, -> { where(staged: true) }
   scope :embedded, -> { where.not(embedding: nil) }
   scope :shared, -> { where(agent_id: nil) }
 

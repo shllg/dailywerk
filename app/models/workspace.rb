@@ -9,6 +9,7 @@ class Workspace < ApplicationRecord
   has_many :memory_entries, dependent: :destroy, inverse_of: :workspace
   has_many :memory_entry_versions, dependent: :destroy, inverse_of: :workspace
   has_many :sessions, inverse_of: :workspace
+  has_many :user_profiles, dependent: :destroy, inverse_of: :workspace
   has_many :messages, inverse_of: :workspace
   has_many :vaults, dependent: :destroy, inverse_of: :workspace
   has_many :workspace_memberships, dependent: :destroy, inverse_of: :workspace

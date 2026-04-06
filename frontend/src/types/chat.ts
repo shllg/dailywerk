@@ -27,4 +27,5 @@ export interface ChatState {
   sessionId: string
   agent: Agent
   messages: Message[]
+  sessionSummary?: string
 }

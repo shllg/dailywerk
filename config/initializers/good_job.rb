@@ -3,6 +3,16 @@ Rails.application.configure do
   config.good_job.retry_on_unhandled_error = false
   config.good_job.on_thread_error = ->(exception) { Rails.logger.error(exception) }
   config.good_job.cron = {
+    profile_synthesis: {
+      cron: "30 2 * * *",
+      class: "ProfileSynthesisJob",
+      description: "Rewrite synthesized user profiles from memories and archives"
+    },
+    memory_consolidation: {
+      cron: "45 2 * * *",
+      class: "MemoryConsolidationJob",
+      description: "Promote staged memories, deduplicate, and apply recency decay"
+    },
     archive_stale_sessions: {
       cron: "0 3 * * *",
       class: "ArchiveStaleSessionsJob",

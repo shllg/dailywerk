@@ -67,6 +67,48 @@ class CompactionServiceTest < ActiveSupport::TestCase
     end
   end
 
+  test "compact! rewrites the summary when it exceeds the token threshold" do
+    user, workspace = create_user_with_workspace
+
+    with_current_workspace(workspace, user:) do
+      long_summary = "Previous context. " * 1000
+      session = create_session_for_tests(summary: long_summary)
+      12.times { |index| session.messages.create!(role: "user", content: "Message #{index}") }
+
+      service = CompactionService.new(session)
+      service.define_singleton_method(:generate_summary) do |messages, _preserved_facts|
+        "New compacted summary"
+      end
+      service.define_singleton_method(:rewrite_summary) do |old_summary, new_summary|
+        "Rewritten: combined summary"
+      end
+
+      result = service.compact!
+
+      assert result[:compacted]
+      assert_equal "Rewritten: combined summary", session.reload.summary
+    end
+  end
+
+  test "compact! appends summary when under threshold" do
+    user, workspace = create_user_with_workspace
+
+    with_current_workspace(workspace, user:) do
+      session = create_session_for_tests(summary: "Short prior summary")
+      12.times { |index| session.messages.create!(role: "user", content: "Message #{index}") }
+
+      service = CompactionService.new(session)
+      service.define_singleton_method(:generate_summary) do |messages, _preserved_facts|
+        "New summary"
+      end
+
+      result = service.compact!
+
+      assert result[:compacted]
+      assert_equal "Short prior summary\n\n---\n\nNew summary", session.reload.summary
+    end
+  end
+
   private
 
   # @param summary [String, nil]

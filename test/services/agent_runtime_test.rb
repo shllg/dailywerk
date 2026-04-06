@@ -26,6 +26,20 @@ class AgentRuntimeTest < ActiveSupport::TestCase
       self
     end
 
+    def with_thinking(effort: nil, budget: nil)
+      calls << [ :with_thinking, { effort:, budget: }.compact ]
+      self
+    end
+
+    def with_params(**params)
+      calls << [ :with_params, params ]
+      self
+    end
+
+    def with_tools(*)
+      self
+    end
+
     def ask(message)
       calls << [ :ask, message ]
       yield OpenStruct.new(content: "chunk") if block_given?
@@ -65,6 +79,94 @@ class AgentRuntimeTest < ActiveSupport::TestCase
       ],
       session.calls
     )
+  ensure
+    ContextBuilder.define_singleton_method(:new, original_builder)
+  end
+
+  test "applies thinking config when enabled on the agent" do
+    agent = Agent.new(name: "DailyWerk", model_id: "gpt-5.4", thinking: { "enabled" => true, "budget_tokens" => 5000 })
+    session = FakeSession.new(
+      agent:,
+      calls: [],
+      context_window_usage: 0.2,
+      workspace_id: SecureRandom.uuid,
+      id: SecureRandom.uuid
+    )
+    fake_builder = Struct.new(:payload) do
+      def build
+        payload
+      end
+    end.new({ system_prompt: "Prompt", active_message_count: 0, estimated_tokens: 0 })
+    original_builder = ContextBuilder.method(:new)
+
+    ContextBuilder.define_singleton_method(:new) do |session:, agent:|
+      fake_builder
+    end
+
+    AgentRuntime.new(session:).call("Hello")
+
+    assert_includes session.calls, [ :with_thinking, { budget: 5000 } ]
+  ensure
+    ContextBuilder.define_singleton_method(:new, original_builder)
+  end
+
+  test "applies agent params for generation settings" do
+    agent = Agent.new(
+      name: "DailyWerk",
+      model_id: "gpt-5.4",
+      params: { "max_tokens" => 1000, "top_p" => 0.9, "session_timeout_hours" => 8 }
+    )
+    session = FakeSession.new(
+      agent:,
+      calls: [],
+      context_window_usage: 0.2,
+      workspace_id: SecureRandom.uuid,
+      id: SecureRandom.uuid
+    )
+    fake_builder = Struct.new(:payload) do
+      def build
+        payload
+      end
+    end.new({ system_prompt: "", active_message_count: 0, estimated_tokens: 0 })
+    original_builder = ContextBuilder.method(:new)
+
+    ContextBuilder.define_singleton_method(:new) do |session:, agent:|
+      fake_builder
+    end
+
+    AgentRuntime.new(session:).call("Hello")
+
+    params_call = session.calls.find { |c| c.first == :with_params }
+
+    assert_not_nil params_call, "Expected with_params to be called"
+    assert_equal({ max_tokens: 1000, top_p: 0.9 }, params_call.last)
+  ensure
+    ContextBuilder.define_singleton_method(:new, original_builder)
+  end
+
+  test "skips thinking when not enabled on agent" do
+    agent = Agent.new(name: "DailyWerk", model_id: "gpt-5.4")
+    session = FakeSession.new(
+      agent:,
+      calls: [],
+      context_window_usage: 0.2,
+      workspace_id: SecureRandom.uuid,
+      id: SecureRandom.uuid
+    )
+    fake_builder = Struct.new(:payload) do
+      def build
+        payload
+      end
+    end.new({ system_prompt: "", active_message_count: 0, estimated_tokens: 0 })
+    original_builder = ContextBuilder.method(:new)
+
+    ContextBuilder.define_singleton_method(:new) do |session:, agent:|
+      fake_builder
+    end
+
+    AgentRuntime.new(session:).call("Hello")
+
+    assert_not session.calls.any? { |c| c.first == :with_thinking }
   ensure
     ContextBuilder.define_singleton_method(:new, original_builder)
   end

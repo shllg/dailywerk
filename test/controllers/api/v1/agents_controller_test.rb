@@ -137,7 +137,7 @@ class Api::V1::AgentsControllerTest < ActionDispatch::IntegrationTest
         name: "Updated",
         active: true,
         is_default: true,
-        params: {}
+        params: { "max_tokens" => 512 }
       },
       {
         name: @agent.name,

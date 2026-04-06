@@ -51,7 +51,8 @@ module Api
           :name, :model_id, :memory_isolation, :provider, :temperature, :instructions, :soul,
           tool_names: [],
           identity: %w[persona tone constraints],
-          thinking: %w[enabled budget_tokens]
+          thinking: %w[enabled budget_tokens],
+          params: Agent::PARAMS_ALLOWED_KEYS
         )
       end
 

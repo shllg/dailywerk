@@ -5,6 +5,7 @@ import { fetchChat } from '../../services/chatApi'
 import type { Agent as ChatAgent } from '../../types/chat'
 import { MessageBubble } from './MessageBubble'
 import { MessageInput } from './MessageInput'
+import { SessionContextCard } from './SessionContextCard'
 import { TypingIndicator } from './TypingIndicator'
 
 export interface ChatContainerProps {
@@ -20,6 +21,7 @@ export function ChatContainer({
 }: ChatContainerProps) {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [agentName, setAgentName] = useState<string | null>(null)
+  const [sessionSummary, setSessionSummary] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [reloadCount, setReloadCount] = useState(0)
@@ -45,6 +47,7 @@ export function ChatContainer({
 
         setSessionId(chat.sessionId)
         setAgentName(chat.agent.name)
+        setSessionSummary(chat.sessionSummary ?? null)
         setActiveAgent(chat.agent.name)
         onAgentLoaded?.(chat.agent)
         setMessages(
@@ -60,6 +63,7 @@ export function ChatContainer({
         if (cancelled) return
         setSessionId(null)
         setAgentName(null)
+        setSessionSummary(null)
         onAgentLoaded?.(null)
         setActiveAgent(null)
         setMessages([])
@@ -125,6 +129,9 @@ export function ChatContainer({
 
       <div ref={ref} className="flex-1 overflow-y-auto px-4 py-5 sm:px-5">
         <div className="space-y-3">
+          {sessionSummary && (
+            <SessionContextCard summary={sessionSummary} />
+          )}
           {messages.map((message) => (
             <MessageBubble key={message.id} message={message} />
           ))}

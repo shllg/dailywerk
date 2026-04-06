@@ -12,6 +12,7 @@
 # has its own messages, the bridge disappears and the session stands on its own.
 class ContextBuilder
   BRIDGE_MESSAGE_LIMIT = 10
+  USER_PROFILE_TITLE = "## About This User"
   KNOWLEDGE_CONTRACT_TITLE = "## Knowledge Contract"
   LONG_TERM_MEMORY_TITLE = "## Structured Memory"
   PREVIOUS_CONTEXT_TITLE = "## Previous Context"
@@ -30,6 +31,7 @@ class ContextBuilder
   # @return [Hash]
   def build
     prompt_parts = [ PromptBuilder.new(@agent).build ]
+    prompt_parts << user_profile_section
     prompt_parts << knowledge_contract_section
 
     if @session.summary.present?
@@ -49,6 +51,16 @@ class ContextBuilder
   end
 
   private
+
+  # @return [String, nil]
+  def user_profile_section
+    return nil unless Current.user && Current.workspace
+
+    profile = UserProfile.find_by(user: Current.user, workspace: Current.workspace)
+    return nil if profile&.synthesized_profile.blank?
+
+    "#{USER_PROFILE_TITLE}\n\n#{profile.synthesized_profile}"
+  end
 
   # @return [String]
   def knowledge_contract_section
@@ -90,10 +102,10 @@ class ContextBuilder
     parts.compact_blank.join("\n\n").presence
   end
 
-  # Returns summarized bridge messages from the most recently archived session.
-  # This behaves like a sliding window: we only take the newest
-  # `BRIDGE_MESSAGE_LIMIT` user/assistant messages because older context should
-  # already be represented by the inherited summary.
+  # Returns a deterministic session recap plus summarized bridge messages from
+  # the most recently archived session. The recap always fires on a new session
+  # so the agent acknowledges the previous conversation regardless of semantic
+  # relevance.
   #
   # @return [String, nil]
   def bridge_messages_context
@@ -102,23 +114,43 @@ class ContextBuilder
     previous_session = find_previous_session
     return nil unless previous_session
 
+    parts = []
+    parts << deterministic_recap(previous_session)
+
     messages = previous_session.messages
                                .active
                                .where(role: %w[user assistant])
                                .order(created_at: :desc)
                                .limit(BRIDGE_MESSAGE_LIMIT)
                                .reverse
-    return nil if messages.empty?
 
-    summarized_messages = messages.map do |message|
-      text = MessageSummarizer.call(
-        message.content_for_context,
-        model: compaction_model
-      )
-      "[#{message.role}] #{text}"
+    if messages.any?
+      summarized_messages = messages.map do |message|
+        text = MessageSummarizer.call(
+          message.content_for_context,
+          model: compaction_model
+        )
+        "[#{message.role}] #{text}"
+      end
+      parts << "#{RECENT_MESSAGES_TITLE}\n\n#{summarized_messages.join("\n")}"
     end
 
-    "#{RECENT_MESSAGES_TITLE}\n\n#{summarized_messages.join("\n")}"
+    parts.compact_blank.join("\n\n").presence
+  end
+
+  # Produces a 1-2 sentence recap from the previous session's archive or summary.
+  #
+  # @param previous_session [Session]
+  # @return [String, nil]
+  def deterministic_recap(previous_session)
+    archive = previous_session.conversation_archive
+    text = archive&.summary.presence || previous_session.summary.presence
+    return nil if text.blank?
+
+    first_sentences = text.split(/(?<=[.!?])\s+/).first(2).join(" ")
+    date = (previous_session.ended_at || previous_session.last_activity_at)&.strftime("%B %d")
+    date_part = date ? " (on #{date})" : ""
+    "Your last conversation with this user#{date_part} was about: #{first_sentences}"
   end
 
   # Finds the archived session immediately preceding the current one.

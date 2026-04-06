@@ -30,7 +30,7 @@ class MemoryRetrievalService
   def select_memories
     budget = ((@session.context_window_size * MEMORY_BUDGET_RATIO) / 4.0).ceil
     query = retrieval_query
-    scope = scoped_memories.active
+    scope = scoped_memories.active.promoted
     candidates = query.present? ? rank_candidates(scope, query) : scope.order(importance: :desc, updated_at: :desc).limit(12).to_a
 
     keep_with_budget(candidates, budget) do |entry|
@@ -171,6 +171,13 @@ class MemoryRetrievalService
 
   # @return [ActiveRecord::Relation]
   def archived_scope
-    @workspace.conversation_archives.where(agent: @agent).where.not(session_id: @session.id)
+    base = @workspace.conversation_archives.where.not(session_id: @session.id)
+
+    case @agent.memory_isolation
+    when "shared", "read_shared"
+      base
+    else
+      base.where(agent: @agent)
+    end
   end
 end

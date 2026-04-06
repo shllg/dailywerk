@@ -110,6 +110,56 @@ class ContextBuilderTest < ActiveSupport::TestCase
     end
   end
 
+  test "build includes user profile when present" do
+    user, workspace = create_user_with_workspace
+
+    with_current_workspace(workspace, user:) do
+      agent = Agent.create!(slug: "main", name: "DailyWerk", model_id: "gpt-5.4")
+      session = Session.resolve(agent:)
+      UserProfile.create!(
+        user:,
+        workspace:,
+        synthesized_profile: "Prefers concise communication. Works on DailyWerk."
+      )
+
+      payload = with_empty_memory_context do
+        ContextBuilder.new(session:).build
+      end
+
+      assert_includes payload[:system_prompt], "## About This User"
+      assert_includes payload[:system_prompt], "Prefers concise communication."
+    end
+  end
+
+  test "build includes deterministic recap for a fresh session" do
+    user, workspace = create_user_with_workspace
+    original_call = MessageSummarizer.method(:call)
+
+    with_current_workspace(workspace, user:) do
+      agent = Agent.create!(slug: "main", name: "DailyWerk", model_id: "gpt-5.4")
+      previous_session = Session.resolve(agent:)
+      previous_session.messages.create!(role: "user", content: "Discuss billing migration.")
+      previous_session.messages.create!(role: "assistant", content: "Sure, let me look at that.")
+      previous_session.update!(summary: "Discussed billing migration strategy. Decided to use Stripe.")
+      previous_session.archive!
+
+      current_session = Session.resolve(agent:)
+
+      MessageSummarizer.define_singleton_method(:call) do |text, model:|
+        text.to_s.upcase
+      end
+
+      payload = with_empty_memory_context do
+        ContextBuilder.new(session: current_session).build
+      end
+
+      assert_includes payload[:system_prompt], "Your last conversation with this user"
+      assert_includes payload[:system_prompt], "Discussed billing migration strategy."
+    end
+  ensure
+    MessageSummarizer.define_singleton_method(:call, original_call)
+  end
+
   private
 
   def with_empty_memory_context

@@ -13,6 +13,7 @@ class Agent < ApplicationRecord
     frequency_penalty
     max_tokens
     presence_penalty
+    recency_half_life_days
     session_timeout_hours
     stop
     top_p

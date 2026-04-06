@@ -39,10 +39,40 @@ class AgentRuntime
       runtime_session = runtime_session.with_tools(*tools) if tools.any?
     end
     runtime_session = runtime_session.with_temperature(@agent.temperature || 0.7)
+    runtime_session = apply_thinking(runtime_session)
+    runtime_session = apply_params(runtime_session)
     runtime_session.ask(user_message, &stream_block)
   end
 
   private
+
+  # Applies provider-level thinking configuration when enabled on the agent.
+  #
+  # @param session [Object] the runtime session
+  # @return [Object]
+  def apply_thinking(session)
+    config = @agent.thinking_config
+    return session if config.empty?
+
+    budget = config.dig(:thinking, :budget_tokens)
+    session.with_thinking(budget: budget)
+  end
+
+  # Applies optional generation parameters from agent.params.
+  #
+  # @param session [Object] the runtime session
+  # @return [Object]
+  def apply_params(session)
+    raw = @agent.params
+    return session unless raw.is_a?(Hash)
+
+    supported = raw.deep_stringify_keys.slice(
+      "frequency_penalty", "max_tokens", "presence_penalty", "top_p", "stop"
+    ).compact
+    return session if supported.empty?
+
+    session.with_params(**supported.symbolize_keys)
+  end
 
   # Enqueues background compaction once the active context window crosses the threshold.
   # The threshold is intentionally lower than 100% so the current request can

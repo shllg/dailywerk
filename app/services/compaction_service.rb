@@ -9,6 +9,7 @@
 class CompactionService
   PRESERVE_RECENT = 10
   DEFAULT_SUMMARY_MODEL = "gpt-4o-mini"
+  SUMMARY_REWRITE_THRESHOLD = 4_000
   PROTECTED_PATTERNS = [
     /```[\s\S]+?```/,
     /error|exception|fail/i,
@@ -58,9 +59,46 @@ class CompactionService
 
   private
 
+  # Combines old and new summaries. When the combined size exceeds the
+  # rewrite threshold, the LLM rewrites both into a single coherent summary
+  # to prevent unbounded growth.
+  #
   # @return [String]
   def combined_summary(new_summary)
-    [ @session.summary.presence, new_summary ].compact.join("\n\n---\n\n")
+    existing = @session.summary.presence
+    return new_summary unless existing
+
+    appended = "#{existing}\n\n---\n\n#{new_summary}"
+    estimated_tokens = appended.length / 4
+
+    if estimated_tokens > SUMMARY_REWRITE_THRESHOLD
+      rewrite_summary(existing, new_summary)
+    else
+      appended
+    end
+  end
+
+  # @param old_summary [String]
+  # @param new_summary [String]
+  # @return [String]
+  def rewrite_summary(old_summary, new_summary)
+    response = RubyLLM.chat(model: compaction_model)
+                      .with_temperature(0.1)
+                      .ask(<<~PROMPT)
+                        Rewrite these two conversation summaries into a single coherent summary.
+                        Preserve all facts, decisions, preferences, file paths, error messages,
+                        and user-specific details. Discard redundancy and verbose transitions.
+
+                        Earlier summary:
+                        #{old_summary}
+
+                        Newer summary:
+                        #{new_summary}
+                      PROMPT
+    response.content.presence || "#{old_summary}\n\n---\n\n#{new_summary}"
+  rescue StandardError => e
+    Rails.logger.error("[Compaction] Summary rewrite failed: #{e.message}")
+    "#{old_summary}\n\n---\n\n#{new_summary}"
   end
 
   # @return [String]

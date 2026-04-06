@@ -12,6 +12,7 @@ interface ChatApiResponse {
   session_id: string
   agent: ChatState['agent']
   messages: ChatApiMessage[]
+  session_summary?: string
 }
 
 function formatTimestamp(timestamp: string) {
@@ -43,6 +44,7 @@ export async function fetchChat(): Promise<ChatState> {
     sessionId: response.session_id,
     agent: response.agent,
     messages: response.messages.map(normalizeMessage),
+    sessionSummary: response.session_summary || undefined,
   }
 }
 
