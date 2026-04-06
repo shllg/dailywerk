@@ -41,15 +41,18 @@ class WorkosJwksService
       key = find_key(kid)
       return nil unless key
 
+      # WorkOS access tokens use issuer: https://api.workos.com/user_management/{client_id}
+      # and may have an empty audience claim.
+      expected_issuer = "https://api.workos.com/user_management/#{WorkOS::DailyWerk.client_id}"
+
       payload, = JWT.decode(
         jwt_string,
         key,
         true,
         algorithm: "RS256",
-        iss: "https://api.workos.com/",
+        iss: expected_issuer,
         verify_iss: true,
-        aud: WorkOS::DailyWerk.client_id,
-        verify_aud: true,
+        verify_aud: false,
         verify_expiration: true,
         verify_iat: true
       )

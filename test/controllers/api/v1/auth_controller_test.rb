@@ -38,8 +38,8 @@ class Api::V1::AuthControllerTest < ActionDispatch::IntegrationTest
     body = JSON.parse(response.body)
 
     assert_predicate body["authorization_url"], :present?
-    assert_includes body["authorization_url"], "code_challenge="
-    assert_includes response.headers["Set-Cookie"], "_dw_pkce="
+    assert_includes body["authorization_url"], "client_id="
+    assert_includes response.headers["Set-Cookie"], "_dw_oauth_state="
   end
 
   # -- me --

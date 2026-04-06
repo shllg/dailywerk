@@ -8,7 +8,7 @@ require "jwt"
 class WorkosJwksServiceTest < ActiveSupport::TestCase
   TEST_KID = "test-kid-#{SecureRandom.hex(4)}"
   TEST_CLIENT_ID = "client_test_123"
-  TEST_ISSUER = "https://api.workos.com/"
+  TEST_ISSUER = "https://api.workos.com/user_management/client_test_123"
 
   setup do
     @rsa_key = OpenSSL::PKey::RSA.generate(2048)
@@ -42,22 +42,13 @@ class WorkosJwksServiceTest < ActiveSupport::TestCase
 
     assert_not_nil result
     assert_equal "user_test_abc", result["sub"]
-    assert_equal TEST_CLIENT_ID, result["aud"]
+    assert_equal TEST_ISSUER, result["iss"]
   end
 
   test "returns nil for expired JWT" do
     populate_l1_cache
 
     payload = build_valid_payload(exp: 1.hour.ago.to_i)
-    token = sign_jwt(payload)
-
-    assert_nil WorkosJwksService.verify_token(token)
-  end
-
-  test "returns nil for wrong audience" do
-    populate_l1_cache
-
-    payload = build_valid_payload(aud: "wrong_client_id")
     token = sign_jwt(payload)
 
     assert_nil WorkosJwksService.verify_token(token)
@@ -141,7 +132,6 @@ class WorkosJwksServiceTest < ActiveSupport::TestCase
     {
       "sub" => "user_test_abc",
       "iss" => TEST_ISSUER,
-      "aud" => TEST_CLIENT_ID,
       "iat" => Time.current.to_i,
       "exp" => 1.hour.from_now.to_i,
       "org_id" => nil

@@ -3,8 +3,8 @@
 # Cookie helpers for WorkOS authentication controllers.
 #
 # Provides encrypted HttpOnly cookie management for the auth session
-# (long-lived, carries session UUID) and the PKCE flow (short-lived,
-# carries state + code_verifier during OAuth redirect).
+# (long-lived, carries session UUID) and the OAuth state nonce
+# (short-lived, CSRF protection during OAuth redirect).
 #
 # Uses MessageEncryptor for confidentiality + integrity (not just signing).
 # Both cookies use SameSite=Lax to survive the OAuth redirect chain.
@@ -13,8 +13,8 @@ module CookieAuth
 
   private
 
-  SESSION_COOKIE = "_dw_auth"
-  PKCE_COOKIE    = "_dw_pkce"
+  SESSION_COOKIE    = "_dw_auth"
+  OAUTH_STATE_COOKIE = "_dw_oauth_state"
 
   # Sets the encrypted auth session cookie containing the UserSession UUID.
   #
@@ -44,35 +44,32 @@ module CookieAuth
     delete_cookie(SESSION_COOKIE, path: "/")
   end
 
-  # Sets the encrypted PKCE cookie containing state and code_verifier.
+  # Sets the encrypted OAuth state cookie for CSRF protection.
   #
   # @param state [String] the OAuth state nonce
-  # @param code_verifier [String] the PKCE code verifier
   # @return [void]
-  def set_pkce_cookie(state:, code_verifier:)
-    payload = { state:, code_verifier: }.to_json
-    value = cookie_encryptor.encrypt_and_sign(payload, purpose: :pkce)
-    set_cookie(PKCE_COOKIE, value, max_age: WorkOS::DailyWerk::PKCE_COOKIE_MAX_AGE, path: "/auth")
+  def set_oauth_state_cookie(state)
+    value = cookie_encryptor.encrypt_and_sign(state, purpose: :oauth_state)
+    set_cookie(OAUTH_STATE_COOKIE, value, max_age: WorkOS::DailyWerk::PKCE_COOKIE_MAX_AGE, path: "/")
   end
 
-  # Reads and decrypts the PKCE cookie.
+  # Reads and decrypts the OAuth state cookie.
   #
-  # @return [Hash, nil] { "state" => ..., "code_verifier" => ... } or nil
-  def read_pkce_cookie
-    raw = cookies[PKCE_COOKIE]
+  # @return [String, nil] the state nonce, or nil if missing/invalid
+  def read_oauth_state_cookie
+    raw = cookies[OAUTH_STATE_COOKIE]
     return nil unless raw.present?
 
-    decrypted = cookie_encryptor.decrypt_and_verify(raw, purpose: :pkce)
-    JSON.parse(decrypted)
-  rescue ActiveSupport::MessageEncryptor::InvalidMessage, JSON::ParserError
+    cookie_encryptor.decrypt_and_verify(raw, purpose: :oauth_state)
+  rescue ActiveSupport::MessageEncryptor::InvalidMessage
     nil
   end
 
-  # Clears the PKCE cookie.
+  # Clears the OAuth state cookie.
   #
   # @return [void]
-  def clear_pkce_cookie
-    delete_cookie(PKCE_COOKIE, path: "/auth")
+  def clear_oauth_state_cookie
+    delete_cookie(OAUTH_STATE_COOKIE, path: "/")
   end
 
   # Sets a cookie with secure defaults.

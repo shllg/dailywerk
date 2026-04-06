@@ -23,28 +23,25 @@ class Auth::CallbacksControllerTest < ActionDispatch::IntegrationTest
     stub_authenticate_with_code(workos_user:)
 
     state = "test_state_123"
-    code_verifier = "test_verifier_456"
+    cookies["_dw_oauth_state"] = build_state_cookie(state)
 
-    cookies["_dw_pkce"] = build_pkce_cookie(state:, code_verifier:)
-
-    get "/auth/callback", params: { code: "auth_code", state: }
+    get "/auth/workos/callback", params: { code: "auth_code", state: }
 
     assert_response :redirect
     assert_match %r{/auth/callback\z}, response.location
   end
 
-  test "missing PKCE cookie redirects to login with error" do
-    get "/auth/callback", params: { code: "auth_code", state: "any" }
+  test "missing state cookie redirects to login with error" do
+    get "/auth/workos/callback", params: { code: "auth_code", state: "any" }
 
     assert_response :redirect
-    assert_match(/login\?error=missing_pkce/, response.location)
+    assert_match(/login\?error=missing_state/, response.location)
   end
 
   test "invalid state redirects to login with error" do
-    state = "correct_state"
-    cookies["_dw_pkce"] = build_pkce_cookie(state:, code_verifier: "verifier")
+    cookies["_dw_oauth_state"] = build_state_cookie("correct_state")
 
-    get "/auth/callback", params: { code: "auth_code", state: "wrong_state" }
+    get "/auth/workos/callback", params: { code: "auth_code", state: "wrong_state" }
 
     assert_response :redirect
     assert_match(/login\?error=invalid_state/, response.location)
@@ -64,10 +61,9 @@ class Auth::CallbacksControllerTest < ActionDispatch::IntegrationTest
     )
   end
 
-  def build_pkce_cookie(state:, code_verifier:)
-    payload = { state:, code_verifier: }.to_json
+  def build_state_cookie(state)
     encryptor = build_cookie_encryptor
-    encryptor.encrypt_and_sign(payload, purpose: :pkce)
+    encryptor.encrypt_and_sign(state, purpose: :oauth_state)
   end
 
   def build_cookie_encryptor

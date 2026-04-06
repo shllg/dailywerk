@@ -80,8 +80,7 @@ module ActiveSupport
     def workos_auth_headers(user:, workspace:)
       payload = {
         "sub" => user.workos_id,
-        "iss" => "https://api.workos.com/",
-        "aud" => "client_test_123",
+        "iss" => "https://api.workos.com/user_management/client_test_123",
         "iat" => Time.current.to_i,
         "exp" => 1.hour.from_now.to_i,
         "org_id" => workspace.workos_organization_id

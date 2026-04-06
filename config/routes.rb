@@ -7,7 +7,7 @@ Rails.application.routes.draw do
   mount ActionCable.server => "/cable"
 
   # WorkOS OAuth callback (browser redirect, outside API namespace)
-  get "auth/callback", to: "auth/callbacks#show"
+  get "auth/workos/callback", to: "auth/callbacks#show"
 
   # WorkOS webhooks
   post "webhooks/workos", to: "webhooks/workos#handle"

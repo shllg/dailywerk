@@ -21,7 +21,7 @@ module Api
           redirect_uri: auth_callback_url
         )
 
-        set_pkce_cookie(state: result[:state], code_verifier: result[:code_verifier])
+        set_oauth_state_cookie(result[:state])
 
         render json: { authorization_url: result[:authorization_url] }
       end
@@ -135,7 +135,7 @@ module Api
 
       # @return [String]
       def auth_callback_url
-        "#{request.protocol}#{request.host_with_port}/auth/callback"
+        "#{request.protocol}#{request.host_with_port}/auth/workos/callback"
       end
     end
   end

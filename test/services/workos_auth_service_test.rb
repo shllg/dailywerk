@@ -18,13 +18,11 @@ class WorkosAuthServiceTest < ActiveSupport::TestCase
     end
   end
 
-  test "authorization_url returns URL with PKCE params and state" do
+  test "authorization_url returns URL with state nonce" do
     result = @service.authorization_url(redirect_uri: "http://localhost:3000/auth/callback")
 
-    assert_includes result[:authorization_url], "code_challenge="
-    assert_includes result[:authorization_url], "code_challenge_method=S256"
+    assert_predicate result[:authorization_url], :present?
     assert_predicate result[:state], :present?
-    assert_predicate result[:code_verifier], :present?
   end
 
   test "exchange_code creates new user and session" do
@@ -40,7 +38,7 @@ class WorkosAuthServiceTest < ActiveSupport::TestCase
 
     session = @service.exchange_code(
       code: "test_code",
-      code_verifier: "test_verifier",
+
       ip_address: "127.0.0.1",
       user_agent: "TestAgent"
     )
@@ -75,7 +73,7 @@ class WorkosAuthServiceTest < ActiveSupport::TestCase
 
     stub_authenticate_with_code(workos_user:)
 
-    session = @service.exchange_code(code: "test_code", code_verifier: "test_verifier")
+    session = @service.exchange_code(code: "test_code")
 
     assert_equal user.id, session.user.id
     assert_equal "Updated Name", session.user.reload.name
@@ -104,7 +102,7 @@ class WorkosAuthServiceTest < ActiveSupport::TestCase
 
     stub_authenticate_with_code(workos_user:)
 
-    session = @service.exchange_code(code: "test_code", code_verifier: "test_verifier")
+    session = @service.exchange_code(code: "test_code")
 
     assert_equal user.id, session.user.id
     assert_equal new_workos_id, session.user.reload.workos_id
@@ -130,7 +128,7 @@ class WorkosAuthServiceTest < ActiveSupport::TestCase
     stub_authenticate_with_code(workos_user:)
 
     error = assert_raises(RuntimeError) do
-      @service.exchange_code(code: "test_code", code_verifier: "test_verifier")
+      @service.exchange_code(code: "test_code")
     end
     assert_match(/Cannot link unverified email/, error.message)
   ensure

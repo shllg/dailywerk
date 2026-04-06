@@ -1,21 +1,20 @@
 # frozen_string_literal: true
 
 require "securerandom"
-require "openssl"
-require "base64"
 
-# Orchestrates the WorkOS OAuth flow: PKCE URL generation, code exchange,
-# user find-or-create, token refresh, and logout URL retrieval.
+# Orchestrates the WorkOS OAuth flow: authorization URL generation, code
+# exchange, user find-or-create, token refresh, and logout URL retrieval.
+#
+# Note: PKCE is not used because the WorkOS Ruby SDK (v5) does not expose
+# code_challenge/code_verifier parameters. This is a server-side confidential
+# client — the authorization code never touches the browser, so PKCE is not
+# required. The `state` parameter provides OAuth CSRF protection.
 class WorkosAuthService
-  # Generates a PKCE-protected authorization URL for WorkOS.
+  # Generates an authorization URL for WorkOS with a state nonce.
   #
   # @param redirect_uri [String] the callback URL
-  # @return [Hash] { authorization_url:, state:, code_verifier: }
+  # @return [Hash] { authorization_url:, state: }
   def authorization_url(redirect_uri:)
-    code_verifier = SecureRandom.urlsafe_base64(32)
-    code_challenge = Base64.urlsafe_encode64(
-      OpenSSL::Digest::SHA256.digest(code_verifier), padding: false
-    )
     state = SecureRandom.urlsafe_base64(24)
 
     url = WorkOS::UserManagement.authorization_url(
@@ -25,21 +24,16 @@ class WorkosAuthService
       provider: "authkit"
     )
 
-    # Append PKCE params (WorkOS SDK doesn't include them in authorization_url)
-    separator = url.include?("?") ? "&" : "?"
-    url = "#{url}#{separator}code_challenge=#{code_challenge}&code_challenge_method=S256"
-
-    { authorization_url: url, state:, code_verifier: }
+    { authorization_url: url, state: }
   end
 
   # Exchanges an authorization code for tokens and finds or creates the user.
   #
   # @param code [String] the authorization code from WorkOS
-  # @param code_verifier [String] the PKCE code verifier
   # @param ip_address [String, nil]
   # @param user_agent [String, nil]
   # @return [UserSession]
-  def exchange_code(code:, code_verifier:, ip_address: nil, user_agent: nil)
+  def exchange_code(code:, ip_address: nil, user_agent: nil)
     response = WorkOS::UserManagement.authenticate_with_code(
       code:,
       client_id: client_id,

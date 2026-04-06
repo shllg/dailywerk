@@ -10,6 +10,8 @@ export default defineConfig({
     port: parseInt(process.env.VITE_PORT || '5173'),
     proxy: {
       '/api': `http://localhost:${apiPort}`,
+      '/auth/workos/callback': `http://localhost:${apiPort}`,
+      '/webhooks': `http://localhost:${apiPort}`,
       '/cable': {
         target: `ws://localhost:${apiPort}`,
         ws: true,
