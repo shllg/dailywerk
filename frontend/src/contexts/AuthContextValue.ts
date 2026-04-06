@@ -6,8 +6,14 @@ export interface AuthContextValue {
   workspace: AuthWorkspace | null
   token: string | null
   isAuthenticated: boolean
-  login: (email: string) => Promise<void>
+  isLoading: boolean
+  login: (email?: string) => Promise<void>
   logout: () => void
+  setSession: (
+    token: string,
+    user: AuthUser,
+    workspace: AuthWorkspace,
+  ) => void
 }
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined)

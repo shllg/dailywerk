@@ -1,21 +1,16 @@
+import { getToken } from '../contexts/AuthContext'
+import { refreshToken } from './authApi'
+
 const API_BASE = '/api/v1'
 
-const AUTH_TOKEN_KEY = 'auth_token'
-const AUTH_USER_KEY = 'auth_user'
-const AUTH_WORKSPACE_KEY = 'auth_workspace'
-
-function clearStoredAuth() {
-  localStorage.removeItem(AUTH_TOKEN_KEY)
-  localStorage.removeItem(AUTH_USER_KEY)
-  localStorage.removeItem(AUTH_WORKSPACE_KEY)
-}
+let refreshPromise: Promise<string | null> | null = null
 
 export async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
   const headers = new Headers(options.headers)
-  const token = localStorage.getItem(AUTH_TOKEN_KEY)
+  const token = getToken()
 
   if (token) headers.set('Authorization', `Bearer ${token}`)
   if (options.body && !headers.has('Content-Type')) {
@@ -28,8 +23,32 @@ export async function apiRequest<T>(
   })
 
   if (response.status === 401) {
-    clearStoredAuth()
+    // Attempt one refresh (deduplicated across concurrent requests)
+    const newToken = await attemptRefresh()
+    if (newToken) {
+      // Retry with new token
+      const retryHeaders = new Headers(options.headers)
+      retryHeaders.set('Authorization', `Bearer ${newToken}`)
+      if (options.body && !retryHeaders.has('Content-Type')) {
+        retryHeaders.set('Content-Type', 'application/json')
+      }
+
+      const retryResponse = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers: retryHeaders,
+      })
+
+      if (!retryResponse.ok) {
+        window.dispatchEvent(new Event('auth:logout'))
+        throw new Error(`HTTP ${retryResponse.status}`)
+      }
+
+      if (retryResponse.status === 204) return undefined as T
+      return retryResponse.json() as Promise<T>
+    }
+
     window.dispatchEvent(new Event('auth:logout'))
+    throw new Error('HTTP 401')
   }
 
   if (!response.ok) {
@@ -41,4 +60,17 @@ export async function apiRequest<T>(
   }
 
   return response.json() as Promise<T>
+}
+
+async function attemptRefresh(): Promise<string | null> {
+  if (refreshPromise) return refreshPromise
+
+  refreshPromise = refreshToken()
+    .then((res) => res.access_token)
+    .catch(() => null)
+    .finally(() => {
+      refreshPromise = null
+    })
+
+  return refreshPromise
 }

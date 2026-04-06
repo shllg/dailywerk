@@ -1,15 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchChat, sendMessage } from './chatApi'
 
+// Mock the auth module to provide a token
+vi.mock('../contexts/AuthContext', () => ({
+  getToken: () => 'test-token',
+}))
+
+// Mock authApi to prevent real refresh calls
+vi.mock('./authApi', () => ({
+  refreshToken: () => Promise.reject(new Error('no refresh in test')),
+}))
+
 describe('chatApi', () => {
   beforeEach(() => {
-    localStorage.clear()
-    localStorage.setItem('auth_token', 'test-token')
     vi.restoreAllMocks()
   })
 
   afterEach(() => {
-    localStorage.clear()
+    vi.restoreAllMocks()
   })
 
   it('maps the singleton chat payload into frontend chat state', async () => {

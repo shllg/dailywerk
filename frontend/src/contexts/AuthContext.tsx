@@ -1,104 +1,205 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { SessionResponse } from '../types/auth'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { AuthUser, AuthWorkspace } from '../types/auth'
 import { AuthContext } from './AuthContextValue'
+import { getAuthProvider, getLoginUrl, getMe, postLogout, refreshToken } from '../services/authApi'
 
-const AUTH_TOKEN_KEY = 'auth_token'
-const AUTH_USER_KEY = 'auth_user'
-const AUTH_WORKSPACE_KEY = 'auth_workspace'
+// Module-level token ref for api.ts to access without React context
+let currentToken: string | null = null
 
-function readStoredJson<T>(key: string): T | null {
-  const value = localStorage.getItem(key)
-  if (!value) return null
+export function getToken(): string | null {
+  return currentToken
+}
 
+function decodeJwtExp(token: string): number | null {
   try {
-    return JSON.parse(value) as T
+    const payload = token.split('.')[1]
+    if (!payload) return null
+    const decoded = JSON.parse(atob(payload))
+    return typeof decoded.exp === 'number' ? decoded.exp : null
   } catch {
-    localStorage.removeItem(key)
     return null
   }
 }
 
-function clearStoredAuth() {
-  localStorage.removeItem(AUTH_TOKEN_KEY)
-  localStorage.removeItem(AUTH_USER_KEY)
-  localStorage.removeItem(AUTH_WORKSPACE_KEY)
-}
-
-function persistSession(response: SessionResponse) {
-  localStorage.setItem(AUTH_TOKEN_KEY, response.token)
-  localStorage.setItem(AUTH_USER_KEY, JSON.stringify(response.user))
-  localStorage.setItem(AUTH_WORKSPACE_KEY, JSON.stringify(response.workspace))
-}
+const AUTH_CHANNEL = 'dailywerk_auth'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() =>
-    localStorage.getItem(AUTH_TOKEN_KEY),
-  )
-  const [user, setUser] = useState<AuthUser | null>(() =>
-    readStoredJson<AuthUser>(AUTH_USER_KEY),
-  )
-  const [workspace, setWorkspace] = useState<AuthWorkspace | null>(() =>
-    readStoredJson<AuthWorkspace>(AUTH_WORKSPACE_KEY),
-  )
+  const [token, setTokenState] = useState<string | null>(null)
+  const [user, setUser] = useState<AuthUser | null>(null)
+  const [workspace, setWorkspace] = useState<AuthWorkspace | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const channelRef = useRef<BroadcastChannel | null>(null)
 
-  const syncFromStorage = useCallback(() => {
-    setToken(localStorage.getItem(AUTH_TOKEN_KEY))
-    setUser(readStoredJson<AuthUser>(AUTH_USER_KEY))
-    setWorkspace(readStoredJson<AuthWorkspace>(AUTH_WORKSPACE_KEY))
+  const setToken = useCallback((t: string | null) => {
+    currentToken = t
+    setTokenState(t)
   }, [])
 
-  const logout = useCallback(() => {
-    clearStoredAuth()
+  const clearAuth = useCallback(() => {
     setToken(null)
     setUser(null)
     setWorkspace(null)
-  }, [])
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current)
+      refreshTimerRef.current = null
+    }
+  }, [setToken])
 
-  useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (
-        event.key &&
-        ![AUTH_TOKEN_KEY, AUTH_USER_KEY, AUTH_WORKSPACE_KEY].includes(event.key)
-      ) {
+  // Schedule a token refresh 2 minutes before expiry
+  const scheduleRefresh = useCallback(
+    (jwt: string) => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current)
+      }
+
+      const exp = decodeJwtExp(jwt)
+      if (!exp) return
+
+      const msUntilRefresh = (exp - 120) * 1000 - Date.now()
+      if (msUntilRefresh <= 0) {
+        // Token already near expiry — refresh immediately
+        void refreshToken()
+          .then((res) => {
+            setToken(res.access_token)
+            scheduleRefresh(res.access_token)
+            channelRef.current?.postMessage({
+              type: 'token_refresh',
+              access_token: res.access_token,
+            })
+          })
+          .catch(() => clearAuth())
         return
       }
 
-      syncFromStorage()
-    }
+      refreshTimerRef.current = setTimeout(() => {
+        void refreshToken()
+          .then((res) => {
+            setToken(res.access_token)
+            scheduleRefresh(res.access_token)
+            channelRef.current?.postMessage({
+              type: 'token_refresh',
+              access_token: res.access_token,
+            })
+          })
+          .catch(() => clearAuth())
+      }, msUntilRefresh)
+    },
+    [setToken, clearAuth],
+  )
 
-    const handleLogout = () => {
-      logout()
-    }
+  const setSession = useCallback(
+    (accessToken: string, authUser: AuthUser, authWorkspace: AuthWorkspace) => {
+      setToken(accessToken)
+      setUser(authUser)
+      setWorkspace(authWorkspace)
+      scheduleRefresh(accessToken)
+    },
+    [setToken, scheduleRefresh],
+  )
 
-    window.addEventListener('storage', handleStorage)
-    window.addEventListener('auth:logout', handleLogout)
+  const logout = useCallback(() => {
+    const t = currentToken
+    clearAuth()
+    channelRef.current?.postMessage({ type: 'logout' })
+
+    if (t) {
+      void postLogout(t)
+        .then((res) => {
+          if (res.logout_url) {
+            window.location.href = res.logout_url
+          }
+        })
+        .catch(() => {
+          // Logout API failed — local state already cleared
+        })
+    }
+  }, [clearAuth])
+
+  const login = useCallback(
+    async (email?: string) => {
+      if (email) {
+        // Dev mode — POST to sessions endpoint
+        const response = await fetch('/api/v1/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: { email } }),
+        })
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+
+        const session = (await response.json()) as {
+          token: string
+          user: AuthUser
+          workspace: AuthWorkspace
+        }
+
+        setSession(session.token, session.user, session.workspace)
+        return
+      }
+
+      // WorkOS mode — redirect to authorization URL
+      const cfg = await getAuthProvider()
+      if (cfg.provider === 'dev') {
+        throw new Error('Dev mode requires email parameter')
+      }
+      const { authorization_url } = await getLoginUrl()
+      window.location.href = authorization_url
+    },
+    [setSession],
+  )
+
+  // Restore session from cookie on mount
+  useEffect(() => {
+    void getMe()
+      .then((response) => {
+        setSession(
+          response.access_token,
+          response.user,
+          response.workspace,
+        )
+      })
+      .catch(() => {
+        // No valid session — stay logged out
+      })
+      .finally(() => {
+        setIsLoading(false)
+      })
+  }, [setSession])
+
+  // Cross-tab sync via BroadcastChannel
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return
+
+    const channel = new BroadcastChannel(AUTH_CHANNEL)
+    channelRef.current = channel
+
+    channel.onmessage = (event: MessageEvent) => {
+      const data = event.data as { type: string; access_token?: string }
+
+      if (data.type === 'logout') {
+        clearAuth()
+      } else if (data.type === 'token_refresh' && data.access_token) {
+        setToken(data.access_token)
+        scheduleRefresh(data.access_token)
+      }
+    }
 
     return () => {
-      window.removeEventListener('storage', handleStorage)
-      window.removeEventListener('auth:logout', handleLogout)
+      channel.close()
+      channelRef.current = null
     }
-  }, [logout, syncFromStorage])
+  }, [clearAuth, setToken, scheduleRefresh])
 
-  // TODO: [WorkOS] Replace with a redirect to the WorkOS authorization URL.
-  // The rest of this context (token storage, Bearer header, logout) stays identical.
-  const login = useCallback(async (email: string) => {
-    const response = await fetch('/api/v1/sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session: { email } }),
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+  // Clean up refresh timer on unmount
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current)
+      }
     }
-
-    const session = (await response.json()) as SessionResponse
-
-    persistSession(session)
-    setToken(session.token)
-    setUser(session.user)
-    setWorkspace(session.workspace)
   }, [])
 
   const value = useMemo(
@@ -107,10 +208,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       workspace,
       token,
       isAuthenticated: Boolean(token && user && workspace),
+      isLoading,
       login,
       logout,
+      setSession,
     }),
-    [user, workspace, token, login, logout],
+    [user, workspace, token, isLoading, login, logout, setSession],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

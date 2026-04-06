@@ -5,15 +5,23 @@ import {
   updateAgentConfig,
 } from './agentApi'
 
+// Mock the auth module to provide a token
+vi.mock('../contexts/AuthContext', () => ({
+  getToken: () => 'test-token',
+}))
+
+// Mock authApi to prevent real refresh calls
+vi.mock('./authApi', () => ({
+  refreshToken: () => Promise.reject(new Error('no refresh in test')),
+}))
+
 describe('agentApi', () => {
   beforeEach(() => {
-    localStorage.clear()
-    localStorage.setItem('auth_token', 'test-token')
     vi.restoreAllMocks()
   })
 
   afterEach(() => {
-    localStorage.clear()
+    vi.restoreAllMocks()
   })
 
   it('fetches the agent config payload', async () => {

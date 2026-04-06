@@ -13,32 +13,91 @@ vi.mock('./services/cable', () => ({
   }),
 }))
 
+function mockFetch(overrides: Record<string, unknown> = {}) {
+  return vi.fn().mockImplementation((url: string) => {
+    // Auth provider check
+    if (url.includes('/auth/provider')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ provider: 'dev' }),
+      })
+    }
+
+    // Session restore — unauthenticated by default
+    if (url.includes('/auth/me')) {
+      if (overrides.authenticated) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            access_token: 'test-jwt-token',
+            user: {
+              id: 'user-1',
+              email: 'sascha@dailywerk.com',
+              name: 'Sascha',
+            },
+            workspace: { id: 'workspace-1', name: 'Personal' },
+          }),
+        })
+      }
+      return Promise.resolve({ ok: false, status: 401 })
+    }
+
+    // Health check
+    if (url.includes('/health')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          build_ref: 'main',
+          build_sha: 'abcdef1234567890',
+        }),
+      })
+    }
+
+    // Chat/agent requests
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        session_id: 'session-1',
+        agent: { id: 'agent-1', slug: 'main', name: 'DailyWerk' },
+        messages: [
+          {
+            id: 'message-1',
+            role: 'assistant',
+            content: 'How can I help?',
+            timestamp: '2026-03-30T10:00:00Z',
+          },
+        ],
+      }),
+    })
+  })
+}
+
 describe('App', () => {
   beforeEach(() => {
-    localStorage.clear()
     vi.restoreAllMocks()
   })
 
   afterEach(() => {
-    localStorage.clear()
+    vi.restoreAllMocks()
   })
 
   it('renders the development login page when unauthenticated', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        build_ref: 'main',
-        build_sha: 'abcdef1234567890',
-      }),
-    })
-
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', mockFetch())
 
     render(<App />)
 
-    expect(screen.getByText('DailyWerk')).toBeInTheDocument()
-    expect(screen.getByText('Sign In (Dev)')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('DailyWerk')).toBeInTheDocument()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('Sign In (Dev)')).toBeInTheDocument()
+    })
+
     expect(
       screen.getByDisplayValue('sascha@dailywerk.com'),
     ).toBeInTheDocument()
@@ -46,55 +105,17 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText('Build main - abcdef1')).toBeInTheDocument()
     })
-
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/health')
   })
 
-  it('renders the single chat view when a session is stored', async () => {
-    localStorage.setItem('auth_token', 'test-token')
-    localStorage.setItem(
-      'auth_user',
-      JSON.stringify({
-        id: 'user-1',
-        email: 'sascha@dailywerk.com',
-        name: 'Sascha',
-      }),
-    )
-    localStorage.setItem(
-      'auth_workspace',
-      JSON.stringify({
-        id: 'workspace-1',
-        name: 'Personal',
-      }),
-    )
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          session_id: 'session-1',
-          agent: {
-            id: 'agent-1',
-            slug: 'main',
-            name: 'DailyWerk',
-          },
-          messages: [
-            {
-              id: 'message-1',
-              role: 'assistant',
-              content: 'How can I help?',
-              timestamp: '2026-03-30T10:00:00Z',
-            },
-          ],
-        }),
-      }),
-    )
+  it('renders the single chat view when session is restored', async () => {
+    vi.stubGlobal('fetch', mockFetch({ authenticated: true }))
 
     render(<App />)
 
-    expect(screen.getByText('Personal')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Personal')).toBeInTheDocument()
+    })
+
     expect(screen.getByText('Gateways')).toBeInTheDocument()
 
     await waitFor(() => {

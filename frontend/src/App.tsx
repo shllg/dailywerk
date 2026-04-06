@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import { AppShell } from './components/layout'
 import { AuthProvider } from './contexts/AuthContext'
 import { useAuth } from './hooks/useAuth'
+import { AuthCallbackPage } from './pages/AuthCallbackPage'
 import { LoginPage } from './pages/LoginPage'
 import { AgentsPage } from './pages/AgentsPage'
 import { BillingPage } from './pages/BillingPage'
@@ -15,7 +16,15 @@ import { SettingsPage } from './pages/SettingsPage'
 import { VaultPage } from './pages/VaultPage'
 
 function AuthenticatedApp() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, isLoading } = useAuth()
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-950 text-gray-400">
+        <p>Loading...</p>
+      </div>
+    )
+  }
 
   if (!isAuthenticated) {
     return <LoginPage />
@@ -45,7 +54,10 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <AuthenticatedApp />
+        <Routes>
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          <Route path="*" element={<AuthenticatedApp />} />
+        </Routes>
       </BrowserRouter>
     </AuthProvider>
   )
