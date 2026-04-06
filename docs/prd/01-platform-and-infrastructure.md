@@ -48,7 +48,7 @@ Core capabilities: diary, nutrition/sport tracking, research, calendar managemen
 | **Search** | Hybrid: pgvector (semantic) + PostgreSQL FTS (keyword) | Postgres-native. See [02 §7](./02-integrations-and-channels.md#7-data-search--retrieval-layer). |
 | **File Storage** | Hetzner Object Storage (S3-compatible) | EU residency. Per-user SSE-C encryption. |
 | **Vault Sync** | Obsidian Headless (official CLI, Feb 2026) | Official headless client. Server-side bidirectional sync. Node.js 22+. |
-| **Auth** | WorkOS | SSO, social login, magic links. |
+| **Auth** | WorkOS | SSO, social login, magic links. See [09-authentication-workos.md](./09-authentication-workos.md). |
 | **Payments** | Stripe | Subscriptions, metered overage, add-ons. See [04 §1](./04-billing-and-operations.md#1-payments--stripe-integration). |
 | **LLM Framework** | ruby_llm (v1.14+) + ruby_llm-mcp + ruby_llm-responses_api | Provider-agnostic agents, MCP support, OpenAI Responses API. See [03 §1](./03-agentic-system.md#1-rubyllm-framework-foundation). |
 
@@ -725,6 +725,6 @@ Docker Compose for MVP. Single server for first 10 test users (keep all vaults w
 4. **Frontend architecture** — Vite + React + TypeScript + Tailwind + DaisyUI chosen. [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) defines the initial chat UI, app shell with top bar, and API contract. Component patterns to be codified after more features ship.
 5. **Observability** — Logging, metrics, alerting, health checks, session replay for debugging. Needs dedicated design. Covers structured logging, application metrics (Prometheus/StatsD), alerting rules, and agent session replay for debugging conversational flows.
 6. **GDPR / data deletion** — Define `WorkspaceDeletionService` for hard-delete of all workspace data across PG, S3, Valkey, and vault checkouts. Must cascade through all workspace-scoped tables, purge S3 prefixes, and clear Valkey namespace.
-7. **SPA authentication** — React SPA and Rails API must share a root domain for HttpOnly/Secure/SameSite cookie-based auth. JWT in localStorage is an XSS vector.
+7. ~~**SPA authentication**~~ — Resolved in [09-authentication-workos.md](./09-authentication-workos.md). HttpOnly cookie for session ID, JWT in SPA memory only, PKCE for OAuth CSRF protection.
 8. **Connection pooling** — Falcon at scale needs PgBouncer. Transaction-mode PgBouncer conflicts with session-level SET. Evaluate statement-level pooling or connection pinning strategies.
 9. **Rate limiting** — Per-workspace request rate (requests/minute) in Valkey. Per-provider rate limiting to respect API quotas.
