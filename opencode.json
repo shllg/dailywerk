@@ -1,0 +1,45 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "qwen/qwen3.5-plus",
+  "instructions": [
+    ".claude/rules/00-core.md",
+    ".claude/rules/01-fiber-safety.md",
+    ".claude/rules/02-architecture.md",
+    ".claude/rules/03-data-conventions.md",
+    ".claude/rules/04-security.md",
+    ".claude/rules/05-user-isolation.md",
+    ".claude/rules/06-llm-patterns.md",
+    ".claude/rules/08-testing.md",
+    ".claude/rules/09-background-jobs.md",
+    ".claude/rules/frontend/*.md"
+  ],
+  "provider": {
+    "qwen": {
+      "models": {
+        "qwen3.5-plus": {
+          "name": "Qwen 3.5 Plus",
+          "options": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 16000
+            }
+          }
+        }
+      }
+    },
+    "moonshot": {
+      "models": {
+        "kimi-k2.5": {
+          "name": "Kimi K2.5"
+        }
+      }
+    },
+    "minimax": {
+      "models": {
+        "minimax-m2.5": {
+          "name": "MiniMax M2.5"
+        }
+      }
+    }
+  }
+}
