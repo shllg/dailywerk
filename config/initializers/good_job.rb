@@ -42,6 +42,11 @@ Rails.application.configure do
       cron: "0 */6 * * *",
       class: "VaultReconciliationJob",
       description: "Full disk-vs-DB consistency check"
+    },
+    workos_session_cleanup: {
+      cron: "0 3 * * *",
+      class: "WorkosSessionCleanupJob",
+      description: "Delete expired/revoked auth sessions older than 30 days"
     }
   }
 end
