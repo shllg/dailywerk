@@ -283,7 +283,10 @@ CREATE TABLE public.memory_entries (
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp(6) without time zone NOT NULL,
     updated_at timestamp(6) without time zone NOT NULL,
-    embedding public.vector(1536)
+    embedding public.vector(1536),
+    staged boolean DEFAULT true NOT NULL,
+    promoted_at timestamp(6) without time zone,
+    last_decay_at timestamp(6) without time zone
 );
 
 ALTER TABLE ONLY public.memory_entries FORCE ROW LEVEL SECURITY;
@@ -415,6 +418,23 @@ CREATE TABLE public.tool_calls (
 );
 
 ALTER TABLE ONLY public.tool_calls FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: user_profiles; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_profiles (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    user_id uuid NOT NULL,
+    workspace_id uuid NOT NULL,
+    synthesized_profile text,
+    profile_synthesized_at timestamp(6) without time zone,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+ALTER TABLE ONLY public.user_profiles FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -671,6 +691,14 @@ ALTER TABLE ONLY public.sessions
 
 ALTER TABLE ONLY public.tool_calls
     ADD CONSTRAINT tool_calls_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_profiles user_profiles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_profiles
+    ADD CONSTRAINT user_profiles_pkey PRIMARY KEY (id);
 
 
 --
@@ -996,6 +1024,13 @@ CREATE INDEX index_memory_entries_on_workspace_id_and_fingerprint ON public.memo
 
 
 --
+-- Name: index_memory_entries_on_workspace_staged_importance; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_memory_entries_on_workspace_staged_importance ON public.memory_entries USING btree (workspace_id, staged, importance);
+
+
+--
 -- Name: index_memory_entry_versions_on_editor_agent_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1168,6 +1203,27 @@ CREATE INDEX index_tool_calls_on_name ON public.tool_calls USING btree (name);
 --
 
 CREATE UNIQUE INDEX index_tool_calls_on_tool_call_id ON public.tool_calls USING btree (tool_call_id);
+
+
+--
+-- Name: index_user_profiles_on_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_user_profiles_on_user_id ON public.user_profiles USING btree (user_id);
+
+
+--
+-- Name: index_user_profiles_on_user_id_and_workspace_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_user_profiles_on_user_id_and_workspace_id ON public.user_profiles USING btree (user_id, workspace_id);
+
+
+--
+-- Name: index_user_profiles_on_workspace_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_user_profiles_on_workspace_id ON public.user_profiles USING btree (workspace_id);
 
 
 --
@@ -1368,6 +1424,14 @@ ALTER TABLE ONLY public.memory_entries
 
 
 --
+-- Name: user_profiles fk_rails_1c237bcdda; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_profiles
+    ADD CONSTRAINT fk_rails_1c237bcdda FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
+
+
+--
 -- Name: messages fk_rails_1ee2a92df0; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1485,6 +1549,14 @@ ALTER TABLE ONLY public.memory_entry_versions
 
 ALTER TABLE ONLY public.sessions
     ADD CONSTRAINT fk_rails_85704b4d26 FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
+
+
+--
+-- Name: user_profiles fk_rails_87a6352e58; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_profiles
+    ADD CONSTRAINT fk_rails_87a6352e58 FOREIGN KEY (user_id) REFERENCES public.users(id);
 
 
 --
@@ -1658,6 +1730,12 @@ ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tool_calls ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: user_profiles; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: vault_chunks; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -1735,6 +1813,13 @@ CREATE POLICY workspace_isolation ON public.tool_calls TO app_user USING ((EXIST
 
 
 --
+-- Name: user_profiles workspace_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY workspace_isolation ON public.user_profiles TO app_user USING (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true))) WITH CHECK (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true)));
+
+
+--
 -- Name: vault_chunks workspace_isolation; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -1769,6 +1854,8 @@ CREATE POLICY workspace_isolation ON public.vaults TO app_user USING (((workspac
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260406203944'),
+('20260406203758'),
 ('20260401110300'),
 ('20260401110200'),
 ('20260401110100'),

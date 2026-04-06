@@ -3,7 +3,7 @@ type: prd
 title: Agentic System
 domain: agents
 created: 2026-03-28
-updated: 2026-04-01
+updated: 2026-04-06
 status: canonical
 depends_on:
   - prd/01-platform-and-infrastructure
@@ -16,6 +16,7 @@ implemented_by:
   - rfc/2026-03-31-debug-tools
   - rfc/2026-03-31-voice-message-processing
   - rfc/2026-04-01-web-search-tool
+  - rfc/2026-04-06-memory-associations
 ---
 
 # DailyWerk — Agentic System
@@ -25,7 +26,7 @@ implemented_by:
 > For channel adapters and vault sync: see [02-integrations-and-channels.md](./02-integrations-and-channels.md).
 > For BYOK, MCP, cost tracking, and GoodJob config: see [04-billing-and-operations.md](./04-billing-and-operations.md).
 
-**Implementation status:** [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) implements the first slice — simple chat with a single agent (no tools, no memory, no handoffs). [RFC Agent Configuration](../rfc-done/2026-03-31-agent-configuration.md) (done) adds soul/identity/thinking config, provider selection, `PromptBuilder` service, `AgentDefaults` with reset-to-defaults, `AgentsController` REST API (show/update/reset), and a frontend settings drawer. [RFC Session Management](../rfc-done/2026-03-31-agent-session-management.md) (done) adds compaction, context building, invisible session rotation, and archival. [RFC Debug Tools](../rfc-open/2026-03-31-debug-tools.md) adds developer-mode debugging UI. [RFC Web Search Tool](../rfc-open/2026-04-01-web-search-tool.md) establishes the ToolRegistry foundation and adds Brave Search as the first agent tool (default-on, deactivatable). Sections below describe the full target architecture.
+**Implementation status:** [RFC 002](../rfc-done/2026-03-29-simple-chat-conversation.md) implements the first slice — simple chat with a single agent (no tools, no memory, no handoffs). [RFC Agent Configuration](../rfc-done/2026-03-31-agent-configuration.md) (done) adds soul/identity/thinking config, provider selection, `PromptBuilder` service, `AgentDefaults` with reset-to-defaults, `AgentsController` REST API (show/update/reset), and a frontend settings drawer. [RFC Session Management](../rfc-done/2026-03-31-agent-session-management.md) (done) adds compaction, context building, invisible session rotation, and archival. [RFC Debug Tools](../rfc-open/2026-03-31-debug-tools.md) adds developer-mode debugging UI. [RFC Web Search Tool](../rfc-open/2026-04-01-web-search-tool.md) establishes the ToolRegistry foundation and adds Brave Search as the first agent tool (default-on, deactivatable). Agent continuity improvements (2026-04-06, no RFC): user profile synthesis (Layer 5 via `user_profiles` table), staged memory promotion pipeline with nightly consolidation, bounded summary rewriting, cross-agent archive sharing, deterministic session recap, frontend session context card, and AgentRuntime thinking/params wiring. See [RFC: Memory Associations](../rfc-open/2026-04-06-memory-associations.md) for the planned memory graph layer. Sections below describe the full target architecture.
 
 ---
 
@@ -593,10 +594,18 @@ end
 │    older ones get summarized by compaction (§8).        │
 │                                                         │
 │  Layer 5 — User knowledge synthesis (periodic):         │
-│    Background job runs daily per user, synthesizing     │
-│    all memories, notes, and recent conversations into   │
-│    a dense 2-3 paragraph user profile stored in         │
-│    users.synthesized_profile. Cheap to inject.          │
+│    ✅ IMPLEMENTED. ProfileSynthesisJob (2:30 AM daily)  │
+│    synthesizes promoted memories + recent archives      │
+│    into a bounded ~2000-token profile stored in         │
+│    user_profiles (user_id, workspace_id). Always        │
+│    injected as "## About This User" in system prompt.   │
+│    Rewritten (not appended) on each run.                │
+│                                                         │
+│  Layer 2b — Staged memory promotion:                    │
+│    ✅ IMPLEMENTED. New memories land as staged=true.    │
+│    MemoryConsolidationJob (2:45 AM daily) promotes,     │
+│    deduplicates, resolves contradictions, and applies   │
+│    recency decay. Importance >= 8 auto-promotes.        │
 │                                                         │
 │  Tier 2 — Daily logs:                                   │
 │    daily_logs table. Auto-written by agent.             │
@@ -703,10 +712,11 @@ end
 All scheduled via GoodJob cron (see [04 §8](./04-billing-and-operations.md#8-goodjob-configuration)):
 
 - **Nightly**: Summarize yesterday's daily logs → promote durable facts to Layer 2 (`memory_entries`).
-- **Weekly**: Review Layer 2 entries → consolidate, deduplicate, prune stale facts.
+- ~~**Weekly**: Review Layer 2 entries → consolidate, deduplicate, prune stale facts.~~ → **Done (nightly).** `MemoryConsolidationJob` (2:45 AM) promotes staged memories, deduplicates near-duplicates, supersedes contradictions, bumps high-access importance, and applies configurable recency decay.
 - **Session archival**: Archive sessions inactive >7 days. Generate summary + key facts + embedding → `conversation_archives`.
-- **Daily synthesis**: Per user, synthesize all memories + recent conversations → `users.synthesized_profile` (Layer 5).
-- **Embedding refresh**: Every 15min, generate embeddings for records missing them.
+- ~~**Daily synthesis**: Per user, synthesize all memories + recent conversations → `users.synthesized_profile` (Layer 5).~~ → **Done.** `ProfileSynthesisJob` (2:30 AM) synthesizes per-user-per-workspace profiles into `user_profiles` table. Always injected in system prompt.
+- **Embedding refresh**: Every 20min, generate embeddings for records missing them.
+- **Memory maintenance**: `MemoryMaintenanceJob` (2:15 AM) expires stale entries and deduplicates exact fingerprints.
 
 ---
 

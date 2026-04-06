@@ -3,7 +3,7 @@ type: prd
 title: Future Work
 domain: planning
 created: 2026-03-31
-updated: 2026-04-01
+updated: 2026-04-06
 status: living
 depends_on:
   - prd/01-platform-and-infrastructure
@@ -51,11 +51,13 @@ depends_on:
 | Item | Source | Notes |
 |------|--------|-------|
 | Tool system / ReAct loop | PRD 03 §3, §6 | Full `AgentRuntime` with tool execution loop. RFC: Agent Session Management designed for future tool extension. |
-| Memory architecture (5-layer) | PRD 03 §7 | Long-term memory, daily logs, conversation archives, user profile synthesis. Not yet implemented. |
+| ~~Memory architecture (5-layer)~~ | PRD 03 §7 | **Mostly done (2026-04-06).** Layers 1-5 implemented: explicit memories with staged promotion pipeline, conversation archives, user profile synthesis (`user_profiles` table), bounded compaction rewriting, cross-agent archive sharing, deterministic session recap, frontend session context card. Remaining: daily logs (Tier 2), memory associations graph. See [RFC: Memory Associations](../rfc-open/2026-04-06-memory-associations.md). |
+| Memory associations graph | PRD 03 §7 | (RFC open) Join table linking related memories for cluster retrieval. See [RFC: Memory Associations](../rfc-open/2026-04-06-memory-associations.md). |
+| Daily logs | PRD 03 §7 | `daily_logs` table for auto-written agent activity logs. Nightly summarize → promote to memory. Not yet implemented. |
 | ~~Compaction~~ | PRD 03 §8 | **Done.** Context-window compaction ships at 75% estimated usage. See [RFC: Agent Session Management](../rfc-done/2026-03-31-agent-session-management.md). |
 | Multi-agent routing / handoffs | PRD 03 §4 | `HandoffTool` for inter-agent delegation. `agent_channel_bindings` for message routing. |
 | ~~Smart session rotation~~ | RFC: Agent Session Management D9 | **Done** — inline rotation in `Session.resolve` based on configurable inactivity timeout (default 4h). |
-| Cross-session structured memory (Level 3) | RFC: Agent Session Management D10, PRD 03 §7 | Replace/enhance the summary + sliding window bridge with structured fact extraction. During compaction or archival, extract key facts, preferences, decisions, and user profile data into `memory_entries`. Agent queries these at context-build time for precise recall across sessions. Depends on Memory Architecture (PRD 03 §7). The Level 1+2 bridge (summary + summarized recent messages) is the interim solution. |
+| ~~Cross-session structured memory (Level 3)~~ | RFC: Agent Session Management D10, PRD 03 §7 | **Done (2026-04-06).** `MemoryExtractionJob` extracts facts after each response into staged `memory_entries`. `MemoryConsolidationJob` promotes/deduplicates nightly. `MemoryRetrievalService` injects promoted memories at context-build time. `ProfileSynthesisJob` synthesizes user profile. Deterministic session recap always references previous conversation. |
 | Confidential/isolated sessions | RFC: Simple Chat §2 | Diary agent sessions with privacy boundary. Separate from shared memory pool. |
 | Agent sidebar (multi-agent UI) | RFC: Simple Chat §2 | Sidebar lists agents, not conversations. Clicking an agent opens its current session. |
 | Provider failover | PRD 03 §13.3 | LLM router falls back to OpenRouter when primary provider fails. |
