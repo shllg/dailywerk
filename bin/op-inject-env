@@ -17,5 +17,15 @@ if ! command -v op >/dev/null 2>&1; then
   exit 1
 fi
 
-op inject -i "$TPL" -o "$OUT"
+# Inject 1Password references, then strip empty-value lines so they
+# never override Rails file-based defaults (master.key, database.yml).
+# Keeps comments and lines with actual values.
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
+
+op inject -i "$TPL" -o "$TMP"
+
+# Remove lines matching: KEY= | KEY="" | KEY=''  (empty after the =)
+sed -E '/^[A-Za-z_][A-Za-z0-9_]*=(["'"'"']?)(\1)$/d' "$TMP" > "$OUT"
+
 echo "Injected secrets into ${OUT}"
