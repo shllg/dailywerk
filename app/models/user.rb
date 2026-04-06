@@ -2,8 +2,6 @@
 
 # Stores a person's identity and workspace memberships.
 class User < ApplicationRecord
-  attr_readonly :workos_id
-
   has_many :user_sessions, dependent: :destroy, inverse_of: :user
   has_many :user_profiles, dependent: :destroy, inverse_of: :user
   has_many :workspace_memberships, dependent: :destroy, inverse_of: :user
@@ -24,6 +22,7 @@ class User < ApplicationRecord
   validates :status,
             presence: true,
             inclusion: { in: %w[pending active suspended cancelled] }
+  validate :workos_id_immutable, on: :update
 
   scope :active, -> { where(status: "active") }
 
@@ -33,5 +32,14 @@ class User < ApplicationRecord
   # @return [Workspace, nil] the first workspace the user belongs to
   def default_workspace
     workspaces.order("workspace_memberships.created_at ASC").first
+  end
+
+  private
+
+  # Prevents changing workos_id once it has been set.
+  def workos_id_immutable
+    if workos_id_changed? && workos_id_was.present?
+      errors.add(:workos_id, "cannot be changed once set")
+    end
   end
 end

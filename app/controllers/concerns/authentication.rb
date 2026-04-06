@@ -101,29 +101,45 @@ module Authentication
     user.workspaces.find_by(id: workspace_id) || user.default_workspace
   end
 
-  # TODO: [WorkOS] Replace this verifier with WorkOS JWT validation.
-  # Everything else in this concern should remain the same.
+  # Verifies a Bearer token: tries WorkOS JWKS JWT first, then falls
+  # back to MessageVerifier in local development/test environments.
   #
   # @param token [String]
-  # @return [Hash, nil] the verified token payload
+  # @return [Hash, nil] the verified token payload with user_id and workspace_id
   def verify_token(token)
-    session_token_verifier.verified(token, purpose: :api_session)
+    # Primary: WorkOS JWKS JWT verification
+    if (payload = WorkosJwksService.verify_token(token))
+      workos_id = payload["sub"]
+      user = User.active.find_by(workos_id: workos_id)
+      return nil unless user
+
+      workspace_id = resolve_workspace_from_jwt(payload, user)
+      return { "user_id" => user.id, "workspace_id" => workspace_id }
+    end
+
+    # Fallback: MessageVerifier (dev/test only)
+    if Rails.env.local?
+      return session_token_verifier.verified(token, purpose: :api_session)
+    end
+
+    nil
   rescue ActiveSupport::MessageVerifier::InvalidSignature
     nil
   end
 
-  # Builds a signed API session token for the user and workspace.
+  # Resolves the workspace from a WorkOS JWT org_id claim,
+  # falling back to the user's default workspace.
   #
+  # @param payload [Hash] the decoded JWT payload
   # @param user [User]
-  # @param workspace [Workspace]
-  # @param expires_in [ActiveSupport::Duration]
-  # @return [String]
-  def issue_token(user:, workspace:, expires_in: 12.hours)
-    session_token_verifier.generate(
-      { user_id: user.id, workspace_id: workspace.id },
-      purpose: :api_session,
-      expires_in:
-    )
+  # @return [String, nil] workspace UUID
+  def resolve_workspace_from_jwt(payload, user)
+    org_id = payload["org_id"]
+    if org_id.present?
+      ws = Workspace.find_by(workos_organization_id: org_id)
+      return ws.id if ws
+    end
+    user.default_workspace&.id
   end
 
   # @return [ActiveSupport::MessageVerifier]

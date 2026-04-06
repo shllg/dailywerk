@@ -22,8 +22,8 @@ end
 # DailyWerk-specific WorkOS constants.
 module WorkOS
   module DailyWerk
-    SESSION_COOKIE_NAME  = "_dailywerk_session"
-    PKCE_COOKIE_NAME     = "_dailywerk_pkce"
+    SESSION_COOKIE_NAME  = "_dw_auth"
+    PKCE_COOKIE_NAME     = "_dw_pkce"
     SESSION_COOKIE_MAX_AGE = 30.days.to_i
     PKCE_COOKIE_MAX_AGE    = 600 # 10 minutes
     WS_TICKET_TTL          = 15  # seconds

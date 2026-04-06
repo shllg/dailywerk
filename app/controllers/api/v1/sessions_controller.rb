@@ -3,14 +3,11 @@
 module Api
   module V1
     # Issues a temporary dev-only API session token.
+    #
+    # This controller remains permanently for local development.
+    # In production, authentication goes through WorkOS via
+    # Api::V1::AuthController and Auth::CallbacksController.
     class SessionsController < ApplicationController
-      # ============================================================
-      # TEMPORARY: Development-only fake session controller.
-      # This controller will be removed when WorkOS is integrated.
-      #
-      # TODO: [WorkOS] Replace this with a WorkOS callback controller
-      # and a service that finds or creates the user from WorkOS.
-      # ============================================================
       skip_authentication!
 
       before_action :require_development_environment!
@@ -62,6 +59,20 @@ module Api
       # @return [String] a normalized email address
       def normalized_email(email)
         email.to_s.strip.downcase
+      end
+
+      # Builds a signed API session token for the user and workspace.
+      #
+      # @param user [User]
+      # @param workspace [Workspace]
+      # @param expires_in [ActiveSupport::Duration]
+      # @return [String]
+      def issue_token(user:, workspace:, expires_in: 12.hours)
+        session_token_verifier.generate(
+          { user_id: user.id, workspace_id: workspace.id },
+          purpose: :api_session,
+          expires_in:
+        )
       end
     end
   end

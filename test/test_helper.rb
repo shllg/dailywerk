@@ -1,6 +1,8 @@
 ENV["RAILS_ENV"] ||= "test"
 require_relative "../config/environment"
 require "rails/test_help"
+require "openssl"
+require "jwt"
 
 module ActiveSupport
   class TestCase
@@ -64,6 +66,37 @@ module ActiveSupport
       previous_values.each do |key, value|
         value == :__missing__ ? ENV.delete(key) : ENV[key] = value
       end
+    end
+
+    # Test RSA keypair for WorkOS JWT verification tests.
+    TEST_JWKS_KEYPAIR = OpenSSL::PKey::RSA.generate(2048)
+    TEST_JWKS_KID = "test-jwks-kid"
+
+    # Returns Authorization headers with a WorkOS-style JWT for testing.
+    #
+    # @param user [User] must have a workos_id set
+    # @param workspace [Workspace]
+    # @return [Hash]
+    def workos_auth_headers(user:, workspace:)
+      payload = {
+        "sub" => user.workos_id,
+        "iss" => "https://api.workos.com/",
+        "aud" => "client_test_123",
+        "iat" => Time.current.to_i,
+        "exp" => 1.hour.from_now.to_i,
+        "org_id" => workspace.workos_organization_id
+      }
+
+      token = JWT.encode(payload, TEST_JWKS_KEYPAIR, "RS256", { kid: TEST_JWKS_KID })
+      { "Authorization" => "Bearer #{token}" }
+    end
+
+    # Sets up the JWKS L1 cache with the test keypair so WorkOS JWT
+    # verification works without network calls.
+    #
+    # @return [void]
+    def setup_test_jwks_cache
+      WorkosJwksService::KEYS[TEST_JWKS_KID] = TEST_JWKS_KEYPAIR.public_key
     end
 
     def with_openai_api_key(value: "test-openai-key")
