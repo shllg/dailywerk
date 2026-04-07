@@ -38,6 +38,8 @@ RUN apk add --no-cache bash curl docker-cli jq unzip util-linux && \
 WORKDIR /deploy
 
 COPY deploy/listener /deploy/listener
+COPY deploy/scripts /deploy/scripts
+RUN chmod +x /deploy/scripts/*.sh
 COPY --from=build /listener/dist/server.js /deploy/listener/server.js
 
 ENTRYPOINT ["node", "/deploy/listener/server.js"]
