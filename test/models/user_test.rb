@@ -25,4 +25,18 @@ class UserTest < ActiveSupport::TestCase
     assert_not user.valid?
     assert_includes user.errors[:status], "is not included in the list"
   end
+
+  test "does not allow changing workos_id once it has been set" do
+    user = User.create!(
+      email: "workos-#{SecureRandom.hex(4)}@dailywerk.com",
+      name: "Sascha",
+      status: "active",
+      workos_id: "user_wos_#{SecureRandom.hex(4)}"
+    )
+
+    user.workos_id = "user_wos_#{SecureRandom.hex(4)}"
+
+    assert_not user.valid?
+    assert_includes user.errors[:workos_id], "cannot be changed once set"
+  end
 end

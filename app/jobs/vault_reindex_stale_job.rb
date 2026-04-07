@@ -6,7 +6,7 @@ class VaultReindexStaleJob < ApplicationJob
 
   # @return [void]
   def perform
-    Current.without_workspace_scoping do
+    each_workspace do |_workspace|
       VaultChunk.where(embedding: nil).find_each do |chunk|
         GenerateEmbeddingJob.perform_later("VaultChunk", chunk.id, workspace_id: chunk.workspace_id)
       end

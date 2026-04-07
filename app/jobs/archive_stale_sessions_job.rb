@@ -10,7 +10,7 @@ class ArchiveStaleSessionsJob < ApplicationJob
   def perform
     archived_count = 0
 
-    Current.without_workspace_scoping do
+    each_workspace do |_workspace|
       Session.stale(STALE_THRESHOLD.ago).find_each do |session|
         enqueue_compaction(session) if session.summary.blank? && session.messages.active.exists?
         session.archive!

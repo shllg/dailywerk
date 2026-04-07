@@ -65,6 +65,44 @@ class MemoryManagerTest < ActiveSupport::TestCase
     end
   end
 
+  test "store can lower importance and confidence for an existing memory" do
+    user, workspace = create_user_with_workspace(
+      email: "memory-manager-#{SecureRandom.hex(4)}@dailywerk.com",
+      workspace_name: "Memory Manager"
+    )
+
+    with_current_workspace(workspace, user:) do
+      agent = Agent.create!(slug: "main-#{SecureRandom.hex(4)}", name: "DailyWerk", model_id: "gpt-5.4")
+      session = Session.resolve(agent:)
+      manager = MemoryManager.new(
+        workspace:,
+        actor_user: user,
+        actor_agent: agent,
+        session:
+      )
+
+      manager.store(
+        content: "User prefers concise answers.",
+        category: "preference",
+        importance: 9,
+        confidence: 0.9,
+        visibility: "shared",
+        source: "manual"
+      )
+      entry = manager.store(
+        content: "User prefers concise answers.",
+        category: "preference",
+        importance: 4,
+        confidence: 0.4,
+        visibility: "shared",
+        source: "manual"
+      )
+
+      assert_equal 4, entry.importance
+      assert_in_delta 0.4, entry.confidence.to_f
+    end
+  end
+
   private
 
   def with_shared_memory_stored_twice

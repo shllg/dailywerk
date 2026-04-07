@@ -23,7 +23,12 @@ class MetricsController < ActionController::API
   def authenticate!
     username = ENV["METRICS_BASIC_AUTH_USERNAME"].to_s
     password = ENV["METRICS_BASIC_AUTH_PASSWORD"].to_s
-    return if username.blank? && password.blank?
+    if username.blank? || password.blank?
+      return if !Rails.env.production? && username.blank? && password.blank?
+
+      Rails.logger.error "Metrics endpoint misconfigured: basic auth credentials are required"
+      return head :not_found
+    end
 
     authenticate_or_request_with_http_basic("Metrics") do |provided_username, provided_password|
       ActiveSupport::SecurityUtils.secure_compare(provided_username, username) &&

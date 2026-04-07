@@ -15,6 +15,7 @@ class MessageSummarizerTest < ActiveSupport::TestCase
   test "summarizes long text through ruby_llm" do
     models = []
     temperatures = []
+    schemas = []
     prompts = []
     fake_chat = Object.new
     original_chat = RubyLLM.method(:chat)
@@ -23,9 +24,13 @@ class MessageSummarizerTest < ActiveSupport::TestCase
       temperatures << temperature
       self
     end
+    fake_chat.define_singleton_method(:with_schema) do |schema|
+      schemas << schema
+      self
+    end
     fake_chat.define_singleton_method(:ask) do |prompt|
       prompts << prompt
-      Struct.new(:content).new("condensed")
+      Struct.new(:content).new({ "summaries" => [ "condensed" ] })
     end
 
     RubyLLM.define_singleton_method(:chat) do |model:|
@@ -39,7 +44,39 @@ class MessageSummarizerTest < ActiveSupport::TestCase
     assert_equal "condensed", result
     assert_equal [ "claude-3-7-sonnet" ], models
     assert_equal [ 0.1 ], temperatures
-    assert_match(/Condense this message/, prompts.first)
+    assert_equal [ MessageSummarizer::BATCH_SCHEMA ], schemas
+    assert_match(/Condense each message/, prompts.first)
+  ensure
+    RubyLLM.define_singleton_method(:chat, original_chat)
+  end
+
+  test "batch_call preserves short messages and summarizes long ones in one request" do
+    prompts = []
+    fake_chat = Object.new
+    original_chat = RubyLLM.method(:chat)
+
+    fake_chat.define_singleton_method(:with_temperature) do |_temperature|
+      self
+    end
+    fake_chat.define_singleton_method(:with_schema) do |_schema|
+      self
+    end
+    fake_chat.define_singleton_method(:ask) do |prompt|
+      prompts << prompt
+      Struct.new(:content).new({ "summaries" => [ "condensed one", "condensed two" ] })
+    end
+
+    RubyLLM.define_singleton_method(:chat) do |model:|
+      fake_chat
+    end
+
+    result = MessageSummarizer.batch_call(
+      [ "short", "x" * 600, "y" * 700 ],
+      model: "gpt-5.4"
+    )
+
+    assert_equal [ "short", "condensed one", "condensed two" ], result
+    assert_equal 1, prompts.length
   ensure
     RubyLLM.define_singleton_method(:chat, original_chat)
   end

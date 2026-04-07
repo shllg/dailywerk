@@ -9,6 +9,50 @@ class ApplicationJob < ActiveJob::Base
 
   private
 
+  # Runs a block with both `Current.workspace` and the PostgreSQL RLS session
+  # variable set for a single workspace.
+  #
+  # @param workspace [Workspace]
+  # @param user [User, nil]
+  # @yield Executes within the workspace DB context.
+  # @return [Object]
+  def with_workspace_context(workspace, user: nil)
+    previous_user = Current.user
+    previous_workspace = Current.workspace
+    connection = ActiveRecord::Base.connection
+    previous_db_workspace_id = connection.select_value("SELECT current_setting('app.current_workspace_id', true)")
+
+    Current.user = user
+    Current.workspace = workspace
+    connection.execute(
+      "SET app.current_workspace_id = #{connection.quote(workspace.id)}"
+    )
+
+    yield
+  ensure
+    if workspace&.id.present?
+      if previous_db_workspace_id.present?
+        connection&.execute(
+          "SET app.current_workspace_id = #{connection.quote(previous_db_workspace_id)}"
+        )
+      else
+        connection&.execute("RESET app.current_workspace_id")
+      end
+    end
+    Current.user = previous_user
+    Current.workspace = previous_workspace
+  end
+
+  # Iterates all workspaces with RLS context set per workspace.
+  #
+  # @yieldparam workspace [Workspace]
+  # @return [void]
+  def each_workspace
+    Workspace.find_each do |workspace|
+      with_workspace_context(workspace) { yield workspace }
+    end
+  end
+
   # @yield Runs the job and emits structured lifecycle logs.
   # @return [void]
   def log_job_execution

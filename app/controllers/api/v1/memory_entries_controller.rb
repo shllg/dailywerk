@@ -6,6 +6,8 @@ module Api
     class MemoryEntriesController < ApplicationController
       include RequireWorkspaceAdmin
 
+      rescue_from ActiveRecord::RecordInvalid, with: :render_record_invalid
+
       # Returns the memory entries plus the available private-memory agent scopes.
       #
       # @return [void]
@@ -133,6 +135,12 @@ module Api
           :visibility,
           metadata: {}
         )
+      end
+
+      # @param error [ActiveRecord::RecordInvalid]
+      # @return [void]
+      def render_record_invalid(error)
+        render json: { errors: error.record.errors.full_messages }, status: :unprocessable_entity
       end
     end
   end

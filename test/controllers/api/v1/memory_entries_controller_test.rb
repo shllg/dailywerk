@@ -122,6 +122,29 @@ class Api::V1::MemoryEntriesControllerTest < ActionDispatch::IntegrationTest
     refute body.dig("entry", "active")
   end
 
+  test "create rejects oversized metadata" do
+    post "/api/v1/memory",
+         params: {
+           memory_entry: {
+             content: "User prefers detailed test output.",
+             category: "preference",
+             importance: 8,
+             confidence: 0.9,
+             visibility: "shared",
+             metadata: {
+               notes: "x" * 11_000
+             }
+           }
+         },
+         as: :json,
+         headers: api_auth_headers(user: @user, workspace: @workspace)
+
+    assert_response :unprocessable_entity
+    body = JSON.parse(response.body)
+
+    assert_includes body["errors"], "Metadata must be 10 KB or smaller"
+  end
+
   private
 
   def create_memory_entry!(attributes = {})

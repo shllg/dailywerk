@@ -8,7 +8,7 @@ class VaultReconciliationJob < ApplicationJob
 
   # @return [void]
   def perform
-    Current.without_workspace_scoping do
+    each_workspace do |_workspace|
       Vault.active.find_each do |vault|
         reconcile_vault(vault)
       rescue StandardError => error

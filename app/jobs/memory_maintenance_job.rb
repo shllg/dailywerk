@@ -14,7 +14,7 @@ class MemoryMaintenanceJob < ApplicationJob
 
   # @return [void]
   def expire_stale_memories
-    Current.without_workspace_scoping do
+    each_workspace do |_workspace|
       MemoryEntry.active.where.not(expires_at: nil).where("expires_at <= ?", Time.current).find_each do |entry|
         MemoryManager.new(workspace: entry.workspace, actor_agent: entry.agent, session: entry.session)
                      .deactivate(entry:, reason: "Expired during memory maintenance")
@@ -24,15 +24,14 @@ class MemoryMaintenanceJob < ApplicationJob
 
   # @return [void]
   def deduplicate_exact_matches
-    Current.without_workspace_scoping do
+    each_workspace do |_workspace|
       duplicate_keys = MemoryEntry.active
-                                  .group(:workspace_id, :agent_id, :fingerprint)
+                                  .group(:agent_id, :fingerprint)
                                   .having("COUNT(*) > 1")
-                                  .pluck(:workspace_id, :agent_id, :fingerprint)
+                                  .pluck(:agent_id, :fingerprint)
 
-      duplicate_keys.each do |workspace_id, agent_id, fingerprint|
+      duplicate_keys.each do |agent_id, fingerprint|
         memories = MemoryEntry.where(
-          workspace_id:,
           agent_id:,
           fingerprint:,
           active: true

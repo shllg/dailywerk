@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as authApi from '../services/authApi'
 import * as chatApi from '../services/chatApi'
 import { useActionCableChat } from './useActionCableChat'
 
@@ -11,7 +12,7 @@ const cableState = vi.hoisted(() => ({
 }))
 
 vi.mock('../services/authApi', () => ({
-  getWebsocketTicket: () => Promise.resolve({ ticket: 'test-ticket' }),
+  getWebsocketTicket: vi.fn(),
 }))
 
 vi.mock('../services/cable', () => ({
@@ -53,6 +54,9 @@ describe('useActionCableChat', () => {
     cableState.disconnected = undefined
     cableState.disconnect.mockReset()
     cableState.unsubscribe.mockReset()
+    vi.mocked(authApi.getWebsocketTicket).mockResolvedValue({
+      ticket: 'test-ticket',
+    })
     vi.mocked(chatApi.sendMessage).mockReset()
   })
 
@@ -98,6 +102,26 @@ describe('useActionCableChat', () => {
     unmount()
 
     expect(cableState.disconnect).toHaveBeenCalled()
+  })
+
+  it('surfaces websocket ticket failures as chat errors', async () => {
+    vi.mocked(authApi.getWebsocketTicket).mockRejectedValue(
+      new Error('ticket failed'),
+    )
+
+    const { result } = renderHook(() =>
+      useActionCableChat('session-1', 'token-1', 'DailyWerk'),
+    )
+
+    await waitFor(() => {
+      expect(result.current.messages.at(-1)).toMatchObject({
+        role: 'assistant',
+        content: 'Failed to connect to live updates. Please refresh and try again.',
+        status: 'error',
+      })
+    })
+
+    expect(cableState.received).toBeUndefined()
   })
 
   it('sends user messages through the REST chat API', () => {

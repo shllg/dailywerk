@@ -15,14 +15,15 @@ module Webhooks
     #
     # @return [void]
     def handle
-      event_type = webhook_params[:event]
-      event_data = webhook_params[:data]
+      payload = webhook_params
+      event_type = payload[:event]
+      event_data = payload[:data] || {}
 
       Rails.logger.info "WorkOS webhook received: #{event_type}"
 
       WorkosWebhookJob.perform_later(
         event_type:,
-        data: permitted_event_data(event_data)
+        data: event_data.to_h.deep_stringify_keys
       )
 
       head :ok
@@ -35,19 +36,14 @@ module Webhooks
 
     # @return [ActionController::Parameters]
     def webhook_params
-      params.permit(:event, data: {})
-    end
-
-    # Extracts permitted fields from the event data.
-    #
-    # @param data [ActionController::Parameters]
-    # @return [Hash]
-    def permitted_event_data(data)
-      data.permit(
-        :id, :email, :first_name, :last_name,
-        :email_verified, :profile_picture_url,
-        :created_at, :updated_at
-      ).to_h
+      case params[:event]
+      when "user.updated"
+        params.permit(:event, data: %i[id email first_name last_name])
+      when "user.deleted"
+        params.permit(:event, data: [ :id ])
+      else
+        params.permit(:event)
+      end
     end
 
     # Verifies the WorkOS webhook signature using the SDK.

@@ -7,17 +7,14 @@ class MemoryConsolidationJob < ApplicationJob
 
   # @return [void]
   def perform
-    Current.without_workspace_scoping do
-      Workspace.find_each do |workspace|
-        Current.workspace = workspace
+    each_workspace do |workspace|
+      begin
         stats = MemoryConsolidationService.new(workspace:).call
         log_stats(workspace, stats)
       rescue StandardError => e
         Rails.logger.error(
           "[MemoryConsolidation] Failed for workspace #{workspace.id}: #{e.message}"
         )
-      ensure
-        Current.reset
       end
     end
   end

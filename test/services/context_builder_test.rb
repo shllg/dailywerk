@@ -63,7 +63,7 @@ class ContextBuilderTest < ActiveSupport::TestCase
 
   test "build includes summarized bridge messages for a fresh session" do
     user, workspace = create_user_with_workspace
-    original_call = MessageSummarizer.method(:call)
+    original_batch_call = MessageSummarizer.method(:batch_call)
 
     with_current_workspace(workspace, user:) do
       agent = Agent.create!(slug: "main", name: "DailyWerk", model_id: "gpt-5.4")
@@ -73,8 +73,8 @@ class ContextBuilderTest < ActiveSupport::TestCase
       previous_session.archive!
 
       current_session = Session.resolve(agent:)
-      MessageSummarizer.define_singleton_method(:call) do |text, model:|
-        "#{model}: #{text.to_s.upcase}"
+      MessageSummarizer.define_singleton_method(:batch_call) do |texts, model:|
+        Array(texts).map { |text| "#{model}: #{text.to_s.upcase}" }
       end
 
       payload = with_empty_memory_context do
@@ -86,7 +86,7 @@ class ContextBuilderTest < ActiveSupport::TestCase
       assert_includes payload[:system_prompt], "[assistant] gpt-5.4: PRIOR REPLY"
     end
   ensure
-    MessageSummarizer.define_singleton_method(:call, original_call)
+    MessageSummarizer.define_singleton_method(:batch_call, original_batch_call)
   end
 
   test "build skips bridge messages once the current session has content" do
@@ -133,7 +133,7 @@ class ContextBuilderTest < ActiveSupport::TestCase
 
   test "build includes deterministic recap for a fresh session" do
     user, workspace = create_user_with_workspace
-    original_call = MessageSummarizer.method(:call)
+    original_batch_call = MessageSummarizer.method(:batch_call)
 
     with_current_workspace(workspace, user:) do
       agent = Agent.create!(slug: "main", name: "DailyWerk", model_id: "gpt-5.4")
@@ -145,8 +145,8 @@ class ContextBuilderTest < ActiveSupport::TestCase
 
       current_session = Session.resolve(agent:)
 
-      MessageSummarizer.define_singleton_method(:call) do |text, model:|
-        text.to_s.upcase
+      MessageSummarizer.define_singleton_method(:batch_call) do |texts, model:|
+        Array(texts).map { |text| text.to_s.upcase }
       end
 
       payload = with_empty_memory_context do
@@ -157,7 +157,7 @@ class ContextBuilderTest < ActiveSupport::TestCase
       assert_includes payload[:system_prompt], "Discussed billing migration strategy."
     end
   ensure
-    MessageSummarizer.define_singleton_method(:call, original_call)
+    MessageSummarizer.define_singleton_method(:batch_call, original_batch_call)
   end
 
   private

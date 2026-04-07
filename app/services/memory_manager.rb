@@ -89,7 +89,7 @@ class MemoryManager
     visibility = updates.delete(:visibility)
     agent = updates.delete(:agent)
     updates[:agent] = resolve_agent_scope(visibility:, agent:) if visibility.present? || attributes.key?(:agent)
-    updates[:metadata] = (entry.metadata || {}).deep_merge((updates[:metadata] || {}).deep_stringify_keys) if updates[:metadata]
+    updates[:metadata] = (entry.metadata || {}).deep_merge(normalize_metadata(updates[:metadata])) if updates[:metadata]
 
     entry.update!(updates)
     MemoryEntryVersion.record!(
@@ -188,12 +188,12 @@ class MemoryManager
     expires_at:,
     reason:
   )
-    merged_metadata = (entry.metadata || {}).deep_merge(metadata.deep_stringify_keys)
+    merged_metadata = (entry.metadata || {}).deep_merge(normalize_metadata(metadata))
     entry.update!(
       content: normalized_content,
       category:,
-      importance: [ entry.importance.to_i, importance.to_i ].max,
-      confidence: [ entry.confidence.to_f, confidence.to_f ].max,
+      importance: importance.to_i.clamp(1, 10),
+      confidence: confidence.to_f.clamp(0.0, 1.0),
       source:,
       metadata: merged_metadata,
       session: @session || entry.session,
@@ -245,7 +245,7 @@ class MemoryManager
       source:,
       importance: importance.to_i.clamp(1, 10),
       confidence: confidence.to_f.clamp(0.0, 1.0),
-      metadata: metadata.deep_stringify_keys,
+      metadata: normalize_metadata(metadata),
       expires_at:
     )
     MemoryEntryVersion.record!(
@@ -282,5 +282,19 @@ class MemoryManager
       :metadata,
       :source
     )
+  end
+
+  # @param metadata [Hash, ActionController::Parameters, nil]
+  # @return [Hash]
+  def normalize_metadata(metadata)
+    raw_metadata =
+      case metadata
+      when ActionController::Parameters
+        metadata.to_h
+      else
+        metadata || {}
+      end
+
+    raw_metadata.deep_stringify_keys
   end
 end

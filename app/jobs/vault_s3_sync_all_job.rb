@@ -6,7 +6,7 @@ class VaultS3SyncAllJob < ApplicationJob
 
   # @return [void]
   def perform
-    Current.without_workspace_scoping do
+    each_workspace do |_workspace|
       Vault.active.find_each do |vault|
         VaultS3SyncJob.perform_later(vault.id, workspace_id: vault.workspace_id)
       end

@@ -125,11 +125,11 @@ class ContextBuilder
                                .reverse
 
     if messages.any?
-      summarized_messages = messages.map do |message|
-        text = MessageSummarizer.call(
-          message.content_for_context,
-          model: compaction_model
-        )
+      summarized_texts = MessageSummarizer.batch_call(
+        messages.map(&:content_for_context),
+        model: compaction_model
+      )
+      summarized_messages = messages.zip(summarized_texts).map do |message, text|
         "[#{message.role}] #{text}"
       end
       parts << "#{RECENT_MESSAGES_TITLE}\n\n#{summarized_messages.join("\n")}"

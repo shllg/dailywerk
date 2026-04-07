@@ -38,7 +38,7 @@ class User < ApplicationRecord
 
   # Prevents changing workos_id once it has been set.
   def workos_id_immutable
-    if workos_id_changed? && workos_id_was.present?
+    if will_save_change_to_workos_id? && workos_id_in_database.present?
       errors.add(:workos_id, "cannot be changed once set")
     end
   end

@@ -62,4 +62,25 @@ class MetricsControllerTest < ActionDispatch::IntegrationTest
 
     assert_response :not_found
   end
+
+  test "returns not found in production when metrics auth is misconfigured" do
+    with_rails_env("production") do
+      get "/metrics"
+    end
+
+    assert_response :not_found
+  end
+
+  private
+
+  def with_rails_env(name)
+    original_env = Rails.method(:env)
+    Rails.define_singleton_method(:env) do
+      ActiveSupport::StringInquirer.new(name)
+    end
+
+    yield
+  ensure
+    Rails.define_singleton_method(:env, original_env)
+  end
 end

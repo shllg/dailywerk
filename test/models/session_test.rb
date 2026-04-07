@@ -169,5 +169,28 @@ class SessionTest < ActiveSupport::TestCase
       assert_predicate rotated_session.started_at, :present?
     end
   end
+
+  test "resolve serializes lookup and creation through the agent lock" do
+    user, workspace = create_user_with_workspace
+
+    with_current_workspace(workspace, user:) do
+      agent = Agent.create!(
+        slug: "main-#{SecureRandom.hex(4)}",
+        name: "DailyWerk",
+        model_id: "gpt-5.4"
+      )
+      original_with_lock = agent.method(:with_lock)
+      lock_calls = 0
+
+      agent.define_singleton_method(:with_lock) do |&block|
+        lock_calls += 1
+        original_with_lock.call(&block)
+      end
+
+      Session.resolve(agent:)
+
+      assert_equal 1, lock_calls
+    end
+  end
 end
 # rubocop:enable Minitest/MultipleAssertions

@@ -48,27 +48,25 @@ class Session < ApplicationRecord
     workspace = Current.workspace
     raise ArgumentError, "Current.workspace must be set" unless workspace
 
-    session = find_active_session(agent:, workspace:, gateway:)
-    previous_summary = nil
+    agent.with_lock do
+      session = find_active_session(agent:, workspace:, gateway:)
+      previous_summary = nil
 
-    if session&.stale?
-      previous_summary = session.summary.presence
-      session.archive!
-      session = nil
+      if session&.stale?
+        previous_summary = session.summary.presence
+        session.archive!
+        session = nil
+      end
+
+      session ||= create_new_session(
+        agent:,
+        workspace:,
+        gateway:,
+        inherited_summary: previous_summary
+      )
+
+      ensure_model!(session, agent:)
     end
-
-    session ||= create_new_session(
-      agent:,
-      workspace:,
-      gateway:,
-      inherited_summary: previous_summary
-    )
-
-    return session if session.model.present?
-
-    provider = agent.resolved_provider || AgentRuntime::DEFAULT_PROVIDER
-    session.update!(model: model_record_for(agent.model_id, provider:))
-    session
   end
 
   # Returns the latest persisted context token count for active messages.
@@ -188,6 +186,18 @@ class Session < ApplicationRecord
     end
   end
   private_class_method :create_new_session
+
+  # @param session [Session]
+  # @param agent [Agent]
+  # @return [Session]
+  def self.ensure_model!(session, agent:)
+    return session if session.model.present?
+
+    provider = agent.resolved_provider || AgentRuntime::DEFAULT_PROVIDER
+    session.update!(model: model_record_for(agent.model_id, provider:))
+    session
+  end
+  private_class_method :ensure_model!
 
   # @param model_id [String]
   # @param provider [String, Symbol]

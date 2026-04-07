@@ -32,15 +32,36 @@ class Webhooks::WorkosControllerTest < ActionDispatch::IntegrationTest
   test "valid signature dispatches webhook job" do
     stub_verify_header_success
 
-    payload = { event: "user.updated", data: { id: "user_123", email: "new@example.com" } }
+    payload = {
+      event: "user.updated",
+      data: {
+        id: "user_123",
+        email: "new@example.com",
+        first_name: "New",
+        role: "admin",
+        profile: { admin: true }
+      }
+    }
 
-    assert_enqueued_with(job: WorkosWebhookJob) do
-      post "/webhooks/workos",
-           params: payload.to_json,
-           headers: webhook_headers("valid_signature")
-    end
+    post "/webhooks/workos",
+         params: payload.to_json,
+         headers: webhook_headers("valid_signature")
 
     assert_response :ok
+
+    assert_equal 1, enqueued_jobs.length
+    job_args = enqueued_jobs.last[:args].first
+    job_data = job_args["data"].except("_aj_hash_with_indifferent_access")
+
+    assert_equal "user.updated", job_args["event_type"]
+    assert_equal(
+      {
+        "id" => "user_123",
+        "email" => "new@example.com",
+        "first_name" => "New"
+      },
+      job_data
+    )
   end
 
   test "missing signature returns 401" do

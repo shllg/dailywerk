@@ -7,10 +7,8 @@ class ProfileSynthesisJob < ApplicationJob
 
   # @return [void]
   def perform
-    Current.without_workspace_scoping do
-      Workspace.find_each do |workspace|
-        synthesize_for_workspace(workspace)
-      end
+    each_workspace do |workspace|
+      synthesize_for_workspace(workspace)
     end
   end
 
@@ -20,15 +18,13 @@ class ProfileSynthesisJob < ApplicationJob
   # @return [void]
   def synthesize_for_workspace(workspace)
     workspace.users.find_each do |user|
-      Current.workspace = workspace
-      Current.user = user
-      ProfileSynthesisService.new(user:, workspace:).call
+      with_workspace_context(workspace, user:) do
+        ProfileSynthesisService.new(user:, workspace:).call
+      end
     rescue StandardError => e
       Rails.logger.error(
         "[ProfileSynthesis] Failed for user #{user.id} in workspace #{workspace.id}: #{e.message}"
       )
-    ensure
-      Current.reset
     end
   end
 end

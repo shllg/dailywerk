@@ -6,7 +6,7 @@ class MemoryReindexStaleJob < ApplicationJob
 
   # @return [void]
   def perform
-    Current.without_workspace_scoping do
+    each_workspace do |_workspace|
       MemoryEntry.where(embedding: nil).find_each do |entry|
         GenerateEmbeddingJob.perform_later("MemoryEntry", entry.id, workspace_id: entry.workspace_id)
       end

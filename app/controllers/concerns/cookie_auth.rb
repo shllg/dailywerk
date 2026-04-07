@@ -99,14 +99,12 @@ module CookieAuth
     cookies.delete(name, path:)
   end
 
-  # Lazily builds a MessageEncryptor derived from the app secret.
+  # Builds a MessageEncryptor derived from the app secret.
   #
   # @return [ActiveSupport::MessageEncryptor]
   def cookie_encryptor
-    @cookie_encryptor ||= begin
-      secret = Rails.application.secret_key_base
-      key = ActiveSupport::KeyGenerator.new(secret).generate_key("workos cookie auth", 32)
-      ActiveSupport::MessageEncryptor.new(key)
-    end
+    secret = Rails.application.secret_key_base
+    key = ActiveSupport::KeyGenerator.new(secret).generate_key("workos cookie auth", 32)
+    ActiveSupport::MessageEncryptor.new(key)
   end
 end

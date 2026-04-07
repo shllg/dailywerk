@@ -18,6 +18,7 @@ class MemoryEntry < ApplicationRecord
   ].freeze
   SOURCES = %w[extraction manual system tool user].freeze
   EMBEDDING_DIMENSIONS = 1536
+  MAX_METADATA_BYTESIZE = 10.kilobytes
 
   has_neighbors :embedding
 
@@ -38,6 +39,7 @@ class MemoryEntry < ApplicationRecord
   validates :confidence, numericality: { greater_than_or_equal_to: 0.0, less_than_or_equal_to: 1.0 }
   validates :fingerprint, presence: true
   validate :agent_matches_workspace
+  validate :metadata_is_a_small_object
   validate :session_matches_workspace
   validate :source_message_matches_workspace
 
@@ -104,5 +106,19 @@ class MemoryEntry < ApplicationRecord
     return if source_message.workspace_id == workspace_id
 
     errors.add(:source_message, "must belong to the current workspace")
+  end
+
+  # @return [void]
+  def metadata_is_a_small_object
+    return if metadata.nil?
+
+    unless metadata.is_a?(Hash)
+      errors.add(:metadata, "must be an object")
+      return
+    end
+
+    return unless ActiveSupport::JSON.encode(metadata).bytesize > MAX_METADATA_BYTESIZE
+
+    errors.add(:metadata, "must be 10 KB or smaller")
   end
 end
