@@ -21,7 +21,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setTokenState] = useState<string | null>(null)
   const [user, setUser] = useState<AuthUser | null>(null)
   const [workspace, setWorkspace] = useState<AuthWorkspace | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const isCallback = window.location.pathname === '/auth/callback'
+  const [isLoading, setIsLoading] = useState(!isCallback)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const channelRef = useRef<BroadcastChannel | null>(null)
   const scheduleRefreshRef = useRef<(jwt: string) => void>(() => {})
@@ -147,10 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // restoration there, and two concurrent getMe() calls race on the
   // server-side refresh-token lock.
   useEffect(() => {
-    if (window.location.pathname === '/auth/callback') {
-      setIsLoading(false)
-      return
-    }
+    if (isCallback) return
 
     void getMe()
       .then((response) => {
@@ -166,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => {
         setIsLoading(false)
       })
-  }, [setSession])
+  }, [isCallback, setSession])
 
   // Cross-tab sync via BroadcastChannel
   useEffect(() => {
