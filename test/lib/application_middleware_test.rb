@@ -3,8 +3,8 @@
 require "test_helper"
 
 class ApplicationMiddlewareTest < ActiveSupport::TestCase
-  test "api stack excludes cookies middleware" do
-    refute_includes middleware_classes, ActionDispatch::Cookies
+  test "api stack includes cookies middleware for auth cookies" do
+    assert_includes middleware_classes, ActionDispatch::Cookies
   end
 
   test "api stack excludes session middleware" do

@@ -6,8 +6,9 @@ CI.run do
   step "Style: Ruby", "bin/rubocop"
 
   step "Security: Gem audit", "bin/bundler-audit"
+  step "Security: Frontend audit", "cd frontend && pnpm audit --audit-level high"
   step "Security: Brakeman code analysis", "bin/brakeman --quiet --no-pager --exit-on-warn --exit-on-error"
-  step "Tests: Rails", "bin/test"
+  step "Tests: Rails", "env COVERAGE=1 COVERAGE_MINIMUM=79.5 PARALLEL_WORKERS=1 bin/test"
   step "Tests: Seeds", "env RAILS_ENV=test bin/rails db:seed:replant"
 
   # Optional: Run system tests

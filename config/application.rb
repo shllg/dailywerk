@@ -18,6 +18,7 @@ module Dailywerk
     config.autoload_lib(ignore: %w[assets tasks])
 
     config.api_only = true
+    config.middleware.use ActionDispatch::Cookies
     config.active_record.schema_format = :sql
     config.active_record.encryption.primary_key = (
       ENV["ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY"] ||

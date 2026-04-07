@@ -1,4 +1,15 @@
 ENV["RAILS_ENV"] ||= "test"
+
+if ENV["COVERAGE"] == "1"
+  require "simplecov"
+
+  SimpleCov.command_name "rails-tests"
+  SimpleCov.start "rails" do
+    minimum = ENV.fetch("COVERAGE_MINIMUM", "0").to_f
+    minimum_coverage line: minimum if minimum.positive?
+  end
+end
+
 require_relative "../config/environment"
 require "rails/test_help"
 require "openssl"
@@ -6,7 +17,8 @@ require "jwt"
 
 module ActiveSupport
   class TestCase
-    parallel_workers = ENV["PARALLEL_WORKERS"].presence
+    # Coverage runs use a single worker so SimpleCov emits one stable result.
+    parallel_workers = ENV["COVERAGE"] == "1" ? "1" : ENV["PARALLEL_WORKERS"].presence
     parallel_threshold = ENV["PARALLELIZE_THRESHOLD"].presence
 
     # Run tests in parallel with a tunable threshold so opt-in integration
