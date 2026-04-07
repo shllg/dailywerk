@@ -7,6 +7,7 @@ import {
   useState,
 } from 'react'
 import type { Message } from '../types/chat'
+import { getWebsocketTicket } from '../services/authApi'
 import { createAuthenticatedConsumer } from '../services/cable'
 import { sendMessage as sendChatMessage } from '../services/chatApi'
 
@@ -69,126 +70,134 @@ export function useActionCableChat(
   useEffect(() => {
     if (!sessionId || !token) return
 
-    const consumer = createAuthenticatedConsumer(token)
+    let cancelled = false
+    let consumer: ReturnType<typeof createAuthenticatedConsumer> | null = null
 
-    const subscription = consumer.subscriptions.create(
-      { channel: 'SessionChannel', session_id: sessionId },
-      {
-        disconnected() {
-          resetStreamingState()
-        },
-        received(event: CableEvent) {
-          switch (event.type) {
-            case 'token': {
-              const delta = typeof event.delta === 'string' ? event.delta : ''
-              if (!delta) {
+    getWebsocketTicket(token).then(({ ticket }) => {
+      if (cancelled) return
+
+      consumer = createAuthenticatedConsumer(ticket)
+
+      consumer.subscriptions.create(
+        { channel: 'SessionChannel', session_id: sessionId },
+        {
+          disconnected() {
+            resetStreamingState()
+          },
+          received(event: CableEvent) {
+            switch (event.type) {
+              case 'token': {
+                const delta = typeof event.delta === 'string' ? event.delta : ''
+                if (!delta) {
+                  break
+                }
+
+                const messageId =
+                  (event.message_id as string) ||
+                  streamingMessageIdRef.current ||
+                  crypto.randomUUID()
+
+                const nextContent = streamingContentRef.current + delta
+                streamingMessageIdRef.current = messageId
+                streamingContentRef.current = nextContent
+                setStreamingMessageId(messageId)
+                setStreamingContent(nextContent)
+                setIsStreaming(true)
                 break
               }
 
-              const messageId =
-                (event.message_id as string) ||
-                streamingMessageIdRef.current ||
-                crypto.randomUUID()
+              case 'complete': {
+                const finalContent =
+                  (event.content as string) || streamingContentRef.current
+                const messageId =
+                  (event.message_id as string) ||
+                  streamingMessageIdRef.current ||
+                  crypto.randomUUID()
 
-              const nextContent = streamingContentRef.current + delta
-              streamingMessageIdRef.current = messageId
-              streamingContentRef.current = nextContent
-              setStreamingMessageId(messageId)
-              setStreamingContent(nextContent)
-              setIsStreaming(true)
-              break
-            }
+                if (finalContent) {
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      id: messageId,
+                      role: 'assistant',
+                      content: finalContent,
+                      agentName: activeAgentRef.current || undefined,
+                      timestamp: new Date().toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      }),
+                      status: 'sent',
+                      thinkingContent: thinkingRef.current || undefined,
+                    },
+                  ])
+                }
 
-            case 'complete': {
-              const finalContent =
-                (event.content as string) || streamingContentRef.current
-              const messageId =
-                (event.message_id as string) ||
-                streamingMessageIdRef.current ||
-                crypto.randomUUID()
+                resetStreamingState()
+                break
+              }
 
-              if (finalContent) {
+              case 'error': {
+                const errorMsg =
+                  (event.message as string) || 'An error occurred'
                 setMessages((prev) => [
                   ...prev,
                   {
-                    id: messageId,
+                    id: crypto.randomUUID(),
                     role: 'assistant',
-                    content: finalContent,
+                    content: errorMsg,
                     agentName: activeAgentRef.current || undefined,
                     timestamp: new Date().toLocaleTimeString([], {
                       hour: '2-digit',
                       minute: '2-digit',
                     }),
-                    status: 'sent',
-                    thinkingContent: thinkingRef.current || undefined,
+                    status: 'error',
                   },
                 ])
+                resetStreamingState()
+                break
               }
 
-              resetStreamingState()
-              break
-            }
+              case 'agent_handoff': {
+                const newAgent = event.agent as string
+                syncActiveAgent(newAgent)
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: crypto.randomUUID(),
+                    role: 'system',
+                    content: `Handed off to ${newAgent}`,
+                    timestamp: new Date().toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    }),
+                    status: 'sent',
+                  },
+                ])
+                break
+              }
 
-            case 'error': {
-              const errorMsg = (event.message as string) || 'An error occurred'
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: crypto.randomUUID(),
-                  role: 'assistant',
-                  content: errorMsg,
-                  agentName: activeAgentRef.current || undefined,
-                  timestamp: new Date().toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  }),
-                  status: 'error',
-                },
-              ])
-              resetStreamingState()
-              break
-            }
+              case 'thinking_start': {
+                thinkingRef.current = ''
+                break
+              }
 
-            case 'agent_handoff': {
-              const newAgent = event.agent as string
-              syncActiveAgent(newAgent)
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: crypto.randomUUID(),
-                  role: 'system',
-                  content: `Handed off to ${newAgent}`,
-                  timestamp: new Date().toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  }),
-                  status: 'sent',
-                },
-              ])
-              break
-            }
+              case 'thinking_end': {
+                break
+              }
 
-            case 'thinking_start': {
-              thinkingRef.current = ''
-              break
+              case 'tool_call': {
+                // Tool call events are handled by the streaming message
+                break
+              }
             }
-
-            case 'thinking_end': {
-              break
-            }
-
-            case 'tool_call': {
-              // Tool call events are handled by the streaming message
-              break
-            }
-          }
+          },
         },
-      },
-    )
+      )
+    })
 
     return () => {
-      subscription.unsubscribe()
-      consumer.disconnect()
+      cancelled = true
+      consumer?.disconnect()
     }
   }, [resetStreamingState, sessionId, syncActiveAgent, token])
 

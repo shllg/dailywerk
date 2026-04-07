@@ -142,8 +142,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [setSession],
   )
 
-  // Restore session from cookie on mount
+  // Restore session from cookie on mount.
+  // Skip when on /auth/callback — AuthCallbackPage handles session
+  // restoration there, and two concurrent getMe() calls race on the
+  // server-side refresh-token lock.
   useEffect(() => {
+    if (window.location.pathname === '/auth/callback') {
+      setIsLoading(false)
+      return
+    }
+
     void getMe()
       .then((response) => {
         setSession(

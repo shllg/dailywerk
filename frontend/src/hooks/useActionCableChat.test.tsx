@@ -10,6 +10,10 @@ const cableState = vi.hoisted(() => ({
   unsubscribe: vi.fn(),
 }))
 
+vi.mock('../services/authApi', () => ({
+  getWebsocketTicket: () => Promise.resolve({ ticket: 'test-ticket' }),
+}))
+
 vi.mock('../services/cable', () => ({
   createAuthenticatedConsumer: () => ({
     disconnect: cableState.disconnect,
@@ -61,6 +65,7 @@ describe('useActionCableChat', () => {
       useActionCableChat('session-1', 'token-1', 'DailyWerk'),
     )
 
+    // Wait for the async ticket exchange and subscription setup
     await waitFor(() => {
       expect(cableState.received).toBeTypeOf('function')
     })
@@ -92,7 +97,6 @@ describe('useActionCableChat', () => {
 
     unmount()
 
-    expect(cableState.unsubscribe).toHaveBeenCalled()
     expect(cableState.disconnect).toHaveBeenCalled()
   })
 
