@@ -3,6 +3,33 @@
 # Handles the creation, mutation, and audit history for structured memories.
 class MemoryManager
   VISIBILITIES = %w[shared private].freeze
+  # Internal parameter object for store/create/update flows.
+  StoreRequest = Struct.new(
+    :content,
+    :category,
+    :importance,
+    :confidence,
+    :visibility,
+    :agent,
+    :source,
+    :metadata,
+    :reason,
+    :source_message,
+    :expires_at,
+    keyword_init: true
+  ) do
+    def normalized_content
+      content.to_s.squish
+    end
+
+    def clamped_importance
+      importance.to_i.clamp(1, 10)
+    end
+
+    def clamped_confidence
+      confidence.to_f.clamp(0.0, 1.0)
+    end
+  end
 
   # @param workspace [Workspace]
   # @param actor_user [User, nil]
@@ -42,39 +69,32 @@ class MemoryManager
     source_message: nil,
     expires_at: nil
   )
-    normalized_content = content.to_s.squish
-    raise ArgumentError, "content cannot be blank" if normalized_content.blank?
+    request = StoreRequest.new(
+      content:,
+      category:,
+      importance:,
+      confidence:,
+      visibility:,
+      agent:,
+      source:,
+      metadata:,
+      reason:,
+      source_message:,
+      expires_at:
+    )
+    raise ArgumentError, "content cannot be blank" if request.normalized_content.blank?
 
-    target_agent = resolve_agent_scope(visibility:, agent:)
-    fingerprint = MemoryEntry.fingerprint_for(category:, content: normalized_content)
+    target_agent = resolve_agent_scope(visibility: request.visibility, agent: request.agent)
+    fingerprint = MemoryEntry.fingerprint_for(
+      category: request.category,
+      content: request.normalized_content
+    )
     entry = @workspace.memory_entries.active.find_by(agent: target_agent, fingerprint:)
 
     if entry
-      update_existing_entry(
-        entry,
-        normalized_content:,
-        category:,
-        importance:,
-        confidence:,
-        source:,
-        metadata:,
-        source_message:,
-        expires_at:,
-        reason:
-      )
+      update_existing_entry(entry, request:)
     else
-      create_entry(
-        content: normalized_content,
-        category:,
-        importance:,
-        confidence:,
-        agent: target_agent,
-        source:,
-        metadata:,
-        source_message:,
-        expires_at:,
-        reason:
-      )
+      create_entry(request:, agent: target_agent)
     end
   end
 
@@ -166,45 +186,26 @@ class MemoryManager
   end
 
   # @param entry [MemoryEntry]
-  # @param normalized_content [String]
-  # @param category [String]
-  # @param importance [Integer]
-  # @param confidence [Float, BigDecimal]
-  # @param source [String]
-  # @param metadata [Hash]
-  # @param source_message [Message, nil]
-  # @param expires_at [Time, nil]
-  # @param reason [String, nil]
+  # @param request [StoreRequest]
   # @return [MemoryEntry]
-  def update_existing_entry(
-    entry,
-    normalized_content:,
-    category:,
-    importance:,
-    confidence:,
-    source:,
-    metadata:,
-    source_message:,
-    expires_at:,
-    reason:
-  )
-    merged_metadata = (entry.metadata || {}).deep_merge(normalize_metadata(metadata))
+  def update_existing_entry(entry, request:)
+    merged_metadata = (entry.metadata || {}).deep_merge(normalize_metadata(request.metadata))
     entry.update!(
-      content: normalized_content,
-      category:,
-      importance: importance.to_i.clamp(1, 10),
-      confidence: confidence.to_f.clamp(0.0, 1.0),
-      source:,
+      content: request.normalized_content,
+      category: request.category,
+      importance: request.clamped_importance,
+      confidence: request.clamped_confidence,
+      source: request.source,
       metadata: merged_metadata,
       session: @session || entry.session,
-      source_message: source_message || entry.source_message,
-      expires_at: expires_at || entry.expires_at,
+      source_message: request.source_message || entry.source_message,
+      expires_at: request.expires_at || entry.expires_at,
       active: true
     )
     MemoryEntryVersion.record!(
       memory_entry: entry,
       action: "updated",
-      reason: reason.presence || "Existing memory refreshed",
+      reason: request.reason.presence || "Existing memory refreshed",
       session: @session,
       editor_user: @actor_user,
       editor_agent: @actor_agent
@@ -213,45 +214,26 @@ class MemoryManager
     entry
   end
 
-  # @param content [String]
-  # @param category [String]
-  # @param importance [Integer]
-  # @param confidence [Float, BigDecimal]
+  # @param request [StoreRequest]
   # @param agent [Agent, nil]
-  # @param source [String]
-  # @param metadata [Hash]
-  # @param source_message [Message, nil]
-  # @param expires_at [Time, nil]
-  # @param reason [String, nil]
   # @return [MemoryEntry]
-  def create_entry(
-    content:,
-    category:,
-    importance:,
-    confidence:,
-    agent:,
-    source:,
-    metadata:,
-    source_message:,
-    expires_at:,
-    reason:
-  )
+  def create_entry(request:, agent:)
     entry = @workspace.memory_entries.create!(
       agent:,
       session: @session,
-      source_message:,
-      category:,
-      content:,
-      source:,
-      importance: importance.to_i.clamp(1, 10),
-      confidence: confidence.to_f.clamp(0.0, 1.0),
-      metadata: normalize_metadata(metadata),
-      expires_at:
+      source_message: request.source_message,
+      category: request.category,
+      content: request.normalized_content,
+      source: request.source,
+      importance: request.clamped_importance,
+      confidence: request.clamped_confidence,
+      metadata: normalize_metadata(request.metadata),
+      expires_at: request.expires_at
     )
     MemoryEntryVersion.record!(
       memory_entry: entry,
       action: "created",
-      reason:,
+      reason: request.reason,
       session: @session,
       editor_user: @actor_user,
       editor_agent: @actor_agent

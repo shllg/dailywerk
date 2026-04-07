@@ -51,6 +51,11 @@ Rails.application.configure do
   }
 end
 
+GoodJob::Engine.middleware.use ActionDispatch::Cookies
+GoodJob::Engine.middleware.use ActionDispatch::Session::CookieStore, key: "_dailywerk_session"
+GoodJob::Engine.middleware.use ActionDispatch::Flash
+GoodJob::Engine.middleware.use Rack::MethodOverride
+
 GoodJob::Engine.middleware.use Rack::Auth::Basic, "GoodJob" do |provided_username, provided_password|
   username = ENV["GOOD_JOB_BASIC_AUTH_USERNAME"].to_s
   password = ENV["GOOD_JOB_BASIC_AUTH_PASSWORD"].to_s

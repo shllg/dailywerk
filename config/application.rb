@@ -41,11 +41,6 @@ module Dailywerk
     config.good_job.execution_mode = :external
     config.good_job.enable_cron = ActiveModel::Type::Boolean.new.cast(ENV.fetch("GOOD_JOB_ENABLE_CRON") { "true" })
 
-    # GoodJob dashboard needs these middleware in API-only mode
-    config.middleware.use ActionDispatch::Cookies
-    config.middleware.use ActionDispatch::Session::CookieStore, key: "_dailywerk_session"
-    config.middleware.use ActionDispatch::Flash
-    config.middleware.use Rack::MethodOverride
     config.middleware.insert_before Rails::Rack::Logger, Metrics::RequestMiddleware
   end
 end

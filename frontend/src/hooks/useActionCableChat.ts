@@ -2,26 +2,11 @@ import {
   type Dispatch,
   type SetStateAction,
   useCallback,
-  useEffect,
-  useRef,
-  useState,
 } from 'react'
 import type { Message } from '../types/chat'
-import { getWebsocketTicket } from '../services/authApi'
-import { createAuthenticatedConsumer } from '../services/cable'
 import { sendMessage as sendChatMessage } from '../services/chatApi'
-
-interface CableEvent {
-  type:
-    | 'token'
-    | 'complete'
-    | 'error'
-    | 'tool_call'
-    | 'agent_handoff'
-    | 'thinking_start'
-    | 'thinking_end'
-  [key: string]: unknown
-}
+import { useCableSubscription } from './useCableSubscription'
+import { useStreamingState } from './useStreamingState'
 
 export interface UseActionCableChatReturn {
   messages: Message[]
@@ -39,208 +24,44 @@ export function useActionCableChat(
   token: string | null,
   defaultAgentName: string | null,
 ): UseActionCableChatReturn {
-  const [messages, setMessages] = useState<Message[]>([])
-  const [streamingContent, setStreamingContent] = useState('')
-  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(
-    null,
-  )
-  const [isStreaming, setIsStreaming] = useState(false)
-  const [activeAgent, setActiveAgent] = useState<string | null>(
-    defaultAgentName,
-  )
-  const streamingContentRef = useRef('')
-  const streamingMessageIdRef = useRef<string | null>(null)
-  const activeAgentRef = useRef<string | null>(defaultAgentName)
-  const thinkingRef = useRef('')
-
-  const syncActiveAgent = useCallback((agentName: string | null) => {
-    activeAgentRef.current = agentName
-    setActiveAgent(agentName)
-  }, [])
-
-  const resetStreamingState = useCallback(() => {
-    setStreamingContent('')
-    setStreamingMessageId(null)
-    setIsStreaming(false)
-    streamingContentRef.current = ''
-    streamingMessageIdRef.current = null
-    thinkingRef.current = ''
-  }, [])
-
-  const appendAssistantError = useCallback((content: string) => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content,
-        agentName: activeAgentRef.current || undefined,
-        timestamp: new Date().toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        status: 'error',
-      },
-    ])
-  }, [])
-
-  useEffect(() => {
-    if (!sessionId || !token) return
-
-    let cancelled = false
-    let consumer: ReturnType<typeof createAuthenticatedConsumer> | null = null
-
-    void getWebsocketTicket(token)
-      .then(({ ticket }) => {
-        if (cancelled) return
-
-        consumer = createAuthenticatedConsumer(ticket)
-
-        consumer.subscriptions.create(
-          { channel: 'SessionChannel', session_id: sessionId },
-          {
-            disconnected() {
-              resetStreamingState()
-            },
-            received(event: CableEvent) {
-              switch (event.type) {
-                case 'token': {
-                  const delta = typeof event.delta === 'string' ? event.delta : ''
-                  if (!delta) {
-                    break
-                  }
-
-                  const messageId =
-                    (event.message_id as string) ||
-                    streamingMessageIdRef.current ||
-                    crypto.randomUUID()
-
-                  const nextContent = streamingContentRef.current + delta
-                  streamingMessageIdRef.current = messageId
-                  streamingContentRef.current = nextContent
-                  setStreamingMessageId(messageId)
-                  setStreamingContent(nextContent)
-                  setIsStreaming(true)
-                  break
-                }
-
-                case 'complete': {
-                  const finalContent =
-                    (event.content as string) || streamingContentRef.current
-                  const messageId =
-                    (event.message_id as string) ||
-                    streamingMessageIdRef.current ||
-                    crypto.randomUUID()
-
-                  if (finalContent) {
-                    setMessages((prev) => [
-                      ...prev,
-                      {
-                        id: messageId,
-                        role: 'assistant',
-                        content: finalContent,
-                        agentName: activeAgentRef.current || undefined,
-                        timestamp: new Date().toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        }),
-                        status: 'sent',
-                        thinkingContent: thinkingRef.current || undefined,
-                      },
-                    ])
-                  }
-
-                  resetStreamingState()
-                  break
-                }
-
-                case 'error': {
-                  const errorMsg =
-                    (event.message as string) || 'An error occurred'
-                  appendAssistantError(errorMsg)
-                  resetStreamingState()
-                  break
-                }
-
-                case 'agent_handoff': {
-                  const newAgent = event.agent as string
-                  syncActiveAgent(newAgent)
-                  setMessages((prev) => [
-                    ...prev,
-                    {
-                      id: crypto.randomUUID(),
-                      role: 'system',
-                      content: `Handed off to ${newAgent}`,
-                      timestamp: new Date().toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      }),
-                      status: 'sent',
-                    },
-                  ])
-                  break
-                }
-
-                case 'thinking_start': {
-                  thinkingRef.current = ''
-                  break
-                }
-
-                case 'thinking_end': {
-                  break
-                }
-
-                case 'tool_call': {
-                  // Tool call events are handled by the streaming message
-                  break
-                }
-              }
-            },
-          },
-        )
-      })
-      .catch(() => {
-        if (cancelled) return
-
-        appendAssistantError(
-          'Failed to connect to live updates. Please refresh and try again.',
-        )
-        resetStreamingState()
-      })
-
-    return () => {
-      cancelled = true
-      consumer?.disconnect()
-    }
-  }, [
+  const {
+    messages,
+    streamingContent,
+    streamingMessageId,
+    isStreaming,
+    activeAgent,
+    setActiveAgent,
+    setMessages,
     appendAssistantError,
+    appendUserMessage,
+    handleCableEvent,
     resetStreamingState,
+  } = useStreamingState(defaultAgentName)
+
+  useCableSubscription({
     sessionId,
-    syncActiveAgent,
     token,
-  ])
+    onDisconnected: resetStreamingState,
+    onReceived: handleCableEvent,
+    onTicketError: () => {
+      appendAssistantError(
+        'Failed to connect to live updates. Please refresh and try again.',
+      )
+      resetStreamingState()
+    },
+  })
 
   const sendMessage = useCallback(
     (content: string) => {
       if (!sessionId) return
 
-      const userMessage: Message = {
-        id: crypto.randomUUID(),
-        role: 'user',
-        content,
-        timestamp: new Date().toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        status: 'sent',
-      }
-      setMessages((prev) => [...prev, userMessage])
+      appendUserMessage(content)
 
       void sendChatMessage(content).catch(() => {
         appendAssistantError('Failed to send message. Please try again.')
       })
     },
-    [appendAssistantError, sessionId],
+    [appendAssistantError, appendUserMessage, sessionId],
   )
 
   return {
@@ -250,7 +71,7 @@ export function useActionCableChat(
     isStreaming,
     activeAgent,
     sendMessage,
-    setActiveAgent: syncActiveAgent,
+    setActiveAgent,
     setMessages,
   }
 }
