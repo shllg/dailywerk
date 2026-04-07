@@ -2,13 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { AuthUser, AuthWorkspace } from '../types/auth'
 import { AuthContext } from './AuthContextValue'
 import { getAuthProvider, getLoginUrl, getMe, postLogout, refreshToken } from '../services/authApi'
-
-// Module-level token ref for api.ts to access without React context
-let currentToken: string | null = null
-
-export function getToken(): string | null {
-  return currentToken
-}
+import { getToken, setCurrentToken } from './tokenStore'
 
 function decodeJwtExp(token: string): number | null {
   try {
@@ -30,9 +24,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const channelRef = useRef<BroadcastChannel | null>(null)
+  const scheduleRefreshRef = useRef<(jwt: string) => void>(() => {})
 
   const setToken = useCallback((t: string | null) => {
-    currentToken = t
+    setCurrentToken(t)
     setTokenState(t)
   }, [])
 
@@ -56,37 +51,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const exp = decodeJwtExp(jwt)
       if (!exp) return
 
-      const msUntilRefresh = (exp - 120) * 1000 - Date.now()
-      if (msUntilRefresh <= 0) {
-        // Token already near expiry — refresh immediately
+      const doRefresh = () => {
         void refreshToken()
           .then((res) => {
             setToken(res.access_token)
-            scheduleRefresh(res.access_token)
+            scheduleRefreshRef.current(res.access_token)
             channelRef.current?.postMessage({
               type: 'token_refresh',
               access_token: res.access_token,
             })
           })
           .catch(() => clearAuth())
+      }
+
+      const msUntilRefresh = (exp - 120) * 1000 - Date.now()
+      if (msUntilRefresh <= 0) {
+        doRefresh()
         return
       }
 
-      refreshTimerRef.current = setTimeout(() => {
-        void refreshToken()
-          .then((res) => {
-            setToken(res.access_token)
-            scheduleRefresh(res.access_token)
-            channelRef.current?.postMessage({
-              type: 'token_refresh',
-              access_token: res.access_token,
-            })
-          })
-          .catch(() => clearAuth())
-      }, msUntilRefresh)
+      refreshTimerRef.current = setTimeout(doRefresh, msUntilRefresh)
     },
     [setToken, clearAuth],
   )
+
+  useEffect(() => {
+    scheduleRefreshRef.current = scheduleRefresh
+  }, [scheduleRefresh])
 
   const setSession = useCallback(
     (accessToken: string, authUser: AuthUser, authWorkspace: AuthWorkspace) => {
@@ -99,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const logout = useCallback(() => {
-    const t = currentToken
+    const t = getToken()
     clearAuth()
     channelRef.current?.postMessage({ type: 'logout' })
 

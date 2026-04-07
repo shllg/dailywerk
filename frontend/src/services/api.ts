@@ -1,4 +1,4 @@
-import { getToken } from '../contexts/AuthContext'
+import { getToken } from '../contexts/tokenStore'
 import { refreshToken } from './authApi'
 
 const API_BASE = '/api/v1'

@@ -6,7 +6,7 @@ import {
 } from './agentApi'
 
 // Mock the auth module to provide a token
-vi.mock('../contexts/AuthContext', () => ({
+vi.mock('../contexts/tokenStore', () => ({
   getToken: () => 'test-token',
 }))
 
