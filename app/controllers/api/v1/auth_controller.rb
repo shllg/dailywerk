@@ -31,6 +31,8 @@ module Api
       #
       # @return [void]
       def me
+        return unless ensure_x_requested_with_header!
+
         session = find_active_session
         return render_unauthorized unless session
 
@@ -40,8 +42,8 @@ module Api
 
         render json: {
           access_token: token_result[:access_token],
-          user: serialize_user(user),
-          workspace: workspace ? serialize_workspace(workspace) : nil
+          user: UserSerializer.summary(user),
+          workspace: workspace ? WorkspaceSerializer.summary(workspace) : nil
         }
       rescue WorkosAuthService::RefreshLockUnavailableError
         render_refresh_retry_later
@@ -56,9 +58,7 @@ module Api
       #
       # @return [void]
       def refresh
-        unless request.headers["X-Requested-With"].present?
-          return render json: { error: "Missing X-Requested-With header" }, status: :bad_request
-        end
+        return unless ensure_x_requested_with_header!
 
         session = find_active_session
         return render_unauthorized unless session
@@ -126,21 +126,17 @@ module Api
         UserSession.active.find_by(id: session_id)
       end
 
-      # @param user [User]
-      # @return [Hash]
-      def serialize_user(user)
-        { id: user.id, email: user.email, name: user.name }
-      end
-
-      # @param workspace [Workspace]
-      # @return [Hash]
-      def serialize_workspace(workspace)
-        { id: workspace.id, name: workspace.name }
-      end
-
       # @return [String]
       def auth_callback_url
         "#{request.protocol}#{request.host_with_port}/auth/workos/callback"
+      end
+
+      # @return [Boolean]
+      def ensure_x_requested_with_header!
+        return true if request.headers["X-Requested-With"].present?
+
+        render json: { error: "Missing X-Requested-With header" }, status: :bad_request
+        false
       end
 
       # @return [void]

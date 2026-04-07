@@ -126,6 +126,17 @@ class WorkosJwksServiceTest < ActiveSupport::TestCase
     restore_jwks_fetch
   end
 
+  test "reserve_refetch_slot only grants one caller per cooldown window" do
+    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+    results = 10.times.map do
+      Thread.new { WorkosJwksService.send(:reserve_refetch_slot, now) }
+    end.map(&:value)
+
+    assert_equal 1, results.count(true)
+    assert_equal 9, results.count(false)
+  end
+
   test "fetch_jwks runs outside an async reactor" do
     fake_response = FakeJwksResponse.new(200, { keys: [] }.to_json)
     fake_internet = FakeInternet.new(fake_response)

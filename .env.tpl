@@ -1,9 +1,10 @@
 # Canonical environment template for the repository.
 # Keep this file complete and do not add a separate .env.example.
 #
-# Run commands with `op run --env-file=.env.tpl -- ...` so secret
-# references are resolved in-process instead of being written to disk.
-# Comment out vars that have no dev default.
+# Empty values are stripped by bin/op-inject-env so they never poison
+# Rails (DATABASE_URL="" overrides database.yml, SECRET_KEY_BASE=""
+# overrides config/master.key, etc.).  Comment out vars that have no
+# dev default — they'll only appear in .env when op inject fills them.
 
 # Rails
 RAILS_ENV=development

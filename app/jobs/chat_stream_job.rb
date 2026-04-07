@@ -54,6 +54,7 @@ class ChatStreamJob < ApplicationJob
       }
     )
     Rails.logger.error("[ChatStream] Error: #{e.message}\n#{e.backtrace.first(5).join("\n")}")
+    raise
   end
 
   private

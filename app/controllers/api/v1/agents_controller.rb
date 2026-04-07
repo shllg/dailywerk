@@ -35,7 +35,7 @@ module Api
       # @return [Hash]
       def response_payload
         {
-          agent: agent_json(agent),
+          agent: AgentSerializer.full(agent),
           defaults: AgentDefaults.defaults
         }
       end
@@ -54,28 +54,6 @@ module Api
           thinking: %w[enabled budget_tokens],
           params: Agent::PARAMS_ALLOWED_KEYS
         )
-      end
-
-      # @param agent [Agent]
-      # @return [Hash]
-      def agent_json(agent)
-        {
-          id: agent.id,
-          slug: agent.slug,
-          name: agent.name,
-          model_id: agent.model_id,
-          memory_isolation: agent.memory_isolation,
-          provider: agent.provider,
-          temperature: agent.temperature,
-          instructions: agent.instructions,
-          soul: agent.soul,
-          identity: agent.identity || {},
-          params: agent.params || {},
-          thinking: agent.thinking || {},
-          tool_names: agent.tool_names || [],
-          is_default: agent.is_default,
-          active: agent.active
-        }
       end
     end
   end

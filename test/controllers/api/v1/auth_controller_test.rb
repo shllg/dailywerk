@@ -49,7 +49,7 @@ class Api::V1::AuthControllerTest < ActionDispatch::IntegrationTest
     stub_refresh_token
     set_auth_session_cookie(session)
 
-    get "/api/v1/auth/me"
+    get "/api/v1/auth/me", headers: { "X-Requested-With" => "XMLHttpRequest" }
 
     assert_response :success
     body = JSON.parse(response.body)
@@ -61,8 +61,17 @@ class Api::V1::AuthControllerTest < ActionDispatch::IntegrationTest
     restore_refresh_token
   end
 
-  test "me without session cookie returns 401" do
+  test "me without X-Requested-With returns 400" do
+    session = create_user_session(@user)
+    set_auth_session_cookie(session)
+
     get "/api/v1/auth/me"
+
+    assert_response :bad_request
+  end
+
+  test "me without session cookie returns 401" do
+    get "/api/v1/auth/me", headers: { "X-Requested-With" => "XMLHttpRequest" }
 
     assert_response :unauthorized
   end
@@ -74,7 +83,7 @@ class Api::V1::AuthControllerTest < ActionDispatch::IntegrationTest
     with_cache_store(ActiveSupport::Cache::MemoryStore.new) do
       Rails.cache.write("refresh_lock:session_#{session.id}", "1", unless_exist: true, expires_in: 5.seconds)
 
-      get "/api/v1/auth/me"
+      get "/api/v1/auth/me", headers: { "X-Requested-With" => "XMLHttpRequest" }
     end
 
     assert_response :too_many_requests

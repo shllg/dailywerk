@@ -6,7 +6,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 TPL="${SCRIPT_DIR}/.env.tpl"
 OUT="${SCRIPT_DIR}/.env"
-
 if [ ! -f "$TPL" ]; then
   echo "Error: ${TPL} not found" >&2
   exit 1

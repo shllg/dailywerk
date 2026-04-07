@@ -27,15 +27,8 @@ module Api
 
         render json: {
           token: issue_token(user:, workspace:),
-          user: {
-            id: user.id,
-            email: user.email,
-            name: user.name
-          },
-          workspace: {
-            id: workspace.id,
-            name: workspace.name
-          }
+          user: UserSerializer.summary(user),
+          workspace: WorkspaceSerializer.summary(workspace)
         }
       end
 

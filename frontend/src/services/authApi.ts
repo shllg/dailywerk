@@ -34,7 +34,9 @@ export function getLoginUrl(): Promise<AuthLoginResponse> {
 }
 
 export function getMe(): Promise<AuthMeResponse> {
-  return authFetch('/auth/me')
+  return authFetch('/auth/me', {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+  })
 }
 
 export function refreshToken(): Promise<AuthRefreshResponse> {

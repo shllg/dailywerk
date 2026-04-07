@@ -2,6 +2,7 @@
 
 require "jwt"
 require "async/http/internet"
+require "concurrent/atomic/atomic_reference"
 require "kernel/sync"
 require "json"
 
@@ -17,6 +18,7 @@ require "json"
 class WorkosJwksService
   # L1 cache: kid → OpenSSL::PKey::RSA  (fiber-safe, eagerly initialized)
   KEYS = Concurrent::Map.new
+  LAST_REFETCH_AT = Concurrent::AtomicReference.new(nil)
 
   # Minimum interval between JWKS refetches (DoS protection).
   REFETCH_COOLDOWN = 60 # seconds
@@ -77,7 +79,7 @@ class WorkosJwksService
     #
     # @return [void]
     def reset_rate_limit!
-      @last_refetch_at = nil
+      LAST_REFETCH_AT.set(nil)
     end
 
     private
@@ -110,17 +112,27 @@ class WorkosJwksService
     # @return [void]
     def refetch_jwks
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      last = @last_refetch_at || 0
-
-      if (now - last) < REFETCH_COOLDOWN
+      unless reserve_refetch_slot(now)
         Rails.logger.debug "WorkosJwksService: refetch skipped (cooldown)"
         return
       end
 
-      @last_refetch_at = now
       populate_from_jwks(fetch_jwks)
     rescue StandardError => e
       Rails.logger.warn "WorkosJwksService: JWKS refetch failed: #{e.message}"
+    end
+
+    # Atomically reserves the current refetch window so only one caller
+    # performs the network fetch per cooldown interval.
+    #
+    # @param now [Float]
+    # @return [Boolean]
+    def reserve_refetch_slot(now)
+      loop do
+        last = LAST_REFETCH_AT.get
+        return false if last && (now - last) < REFETCH_COOLDOWN
+        return true if LAST_REFETCH_AT.compare_and_set(last, now)
+      end
     end
 
     # Downloads the JWKS JSON from WorkOS.

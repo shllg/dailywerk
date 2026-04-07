@@ -13,17 +13,13 @@ module Api
 
         render json: {
           session_id: session.id,
-          agent: {
-            id: agent.id,
-            slug: agent.slug,
-            name: agent.name
-          },
+          agent: AgentSerializer.summary(agent),
           session_summary: session.summary,
           context_window_usage: session.context_window_usage.round(2),
           messages: session.context_messages
                            .where(role: %w[user assistant system])
                            .order(:created_at)
-                           .map { |message| message_json(message) }
+                           .map { |message| MessageSerializer.summary(message) }
         }
       end
 
@@ -59,17 +55,6 @@ module Api
       # @return [ActionController::Parameters]
       def message_params
         params.require(:message).permit(:content)
-      end
-
-      # @param message [Message]
-      # @return [Hash]
-      def message_json(message)
-        {
-          id: message.id,
-          role: message.role,
-          content: message.content.to_s,
-          timestamp: message.created_at.iso8601
-        }
       end
     end
   end

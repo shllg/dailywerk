@@ -4,7 +4,6 @@ import { useAuth } from '../hooks/useAuth'
 import { getAuthProvider } from '../services/authApi'
 
 type HealthResponse = {
-  build_ref?: string | null
   build_sha?: string | null
 }
 
@@ -13,12 +12,11 @@ type AuthMode = 'loading' | 'workos' | 'dev'
 function formatBuildLabel(payload: HealthResponse | null) {
   if (!payload) return 'Build info unavailable'
 
-  const ref = payload.build_ref?.trim() || 'unknown'
   const sha = payload.build_sha?.trim()
 
-  if (!sha) return `Build ${ref}`
+  if (!sha) return 'Build info unavailable'
 
-  return `Build ${ref} - ${sha.slice(0, 7)}`
+  return `Build ${sha.slice(0, 7)}`
 }
 
 export function LoginPage() {

@@ -11,10 +11,7 @@ module Api
         render json: {
           status: "ok",
           timestamp: Time.current.iso8601,
-          version: Rails.version,
-          ruby: RUBY_VERSION,
-          build_sha: ENV["BUILD_SHA"],
-          build_ref: ENV["BUILD_REF"]
+          build_sha: ENV["BUILD_SHA"]
         }
       end
     end

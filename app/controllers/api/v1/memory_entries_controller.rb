@@ -11,8 +11,8 @@ module Api
       # @return [void]
       def index
         render json: {
-          entries: filtered_entries.map { |entry| memory_json(entry) },
-          agents: Current.workspace.agents.active.order(:name).map { |agent| agent_json(agent) },
+          entries: filtered_entries.map { |entry| MemoryEntrySerializer.summary(entry) },
+          agents: Current.workspace.agents.active.order(:name).map { |agent| AgentSerializer.memory_scope(agent) },
           categories: MemoryEntry::CATEGORIES
         }
       end
@@ -24,7 +24,7 @@ module Api
         entry = scoped_entries.find(params[:id])
 
         render json: {
-          entry: memory_json(entry, include_versions: true)
+          entry: MemoryEntrySerializer.full(entry)
         }
       end
 
@@ -44,7 +44,7 @@ module Api
           reason: memory_entry_params[:reason]
         )
 
-        render json: { entry: memory_json(entry, include_versions: true) }, status: :created
+        render json: { entry: MemoryEntrySerializer.full(entry) }, status: :created
       end
 
       # Updates an existing structured memory entry.
@@ -58,7 +58,7 @@ module Api
           reason: memory_entry_params[:reason]
         )
 
-        render json: { entry: memory_json(updated_entry, include_versions: true) }
+        render json: { entry: MemoryEntrySerializer.full(updated_entry) }
       end
 
       # Soft-deletes a memory entry so it stops participating in recall.
@@ -68,7 +68,7 @@ module Api
         entry = scoped_entries.find(params[:id])
         manager.deactivate(entry:, reason: params[:reason].presence || "Deleted from memory inspector")
 
-        render json: { entry: memory_json(entry.reload, include_versions: true) }
+        render json: { entry: MemoryEntrySerializer.full(entry.reload) }
       end
 
       private
@@ -132,55 +132,6 @@ module Api
           :source,
           :visibility,
           metadata: {}
-        )
-      end
-
-      # @param agent [Agent]
-      # @return [Hash]
-      def agent_json(agent)
-        {
-          id: agent.id,
-          name: agent.name,
-          slug: agent.slug,
-          memory_isolation: agent.memory_isolation
-        }
-      end
-
-      # @param entry [MemoryEntry]
-      # @param include_versions [Boolean]
-      # @return [Hash]
-      def memory_json(entry, include_versions: false)
-        payload = {
-          id: entry.id,
-          category: entry.category,
-          content: entry.content,
-          source: entry.source,
-          importance: entry.importance,
-          confidence: entry.confidence.to_f.round(2),
-          active: entry.active,
-          visibility: entry.scope_label,
-          fingerprint: entry.fingerprint,
-          expires_at: entry.expires_at&.iso8601,
-          access_count: entry.access_count,
-          last_accessed_at: entry.last_accessed_at&.iso8601,
-          updated_at: entry.updated_at.iso8601,
-          metadata: entry.metadata || {},
-          agent: entry.agent && agent_json(entry.agent),
-          session_id: entry.session_id,
-          source_message_id: entry.source_message_id
-        }
-        return payload unless include_versions
-
-        payload.merge(
-          versions: entry.versions.limit(10).map do |version|
-            {
-              id: version.id,
-              action: version.action,
-              reason: version.reason,
-              created_at: version.created_at.iso8601,
-              snapshot: version.snapshot
-            }
-          end
         )
       end
     end

@@ -30,7 +30,9 @@ class VaultLinkRepairJob < ApplicationJob
     old_basename = File.basename(old_path.to_s, ".*")
     return if old_basename.blank?
 
-    vault.vault_chunks.where("content LIKE ?", "%[[#{old_basename}%").find_each do |chunk|
+    escaped_basename = ActiveRecord::Base.sanitize_sql_like(old_basename)
+
+    vault.vault_chunks.where("content LIKE ?", "%[[#{escaped_basename}%").find_each do |chunk|
       VaultFileChangedJob.perform_later(
         vault.id,
         chunk.file_path,

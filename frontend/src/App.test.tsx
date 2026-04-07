@@ -50,7 +50,6 @@ function mockFetch(overrides: Record<string, unknown> = {}) {
         ok: true,
         status: 200,
         json: async () => ({
-          build_ref: 'main',
           build_sha: 'abcdef1234567890',
         }),
       })
@@ -103,7 +102,7 @@ describe('App', () => {
     ).toBeInTheDocument()
 
     await waitFor(() => {
-      expect(screen.getByText('Build main - abcdef1')).toBeInTheDocument()
+      expect(screen.getByText('Build abcdef1')).toBeInTheDocument()
     })
   })
 
