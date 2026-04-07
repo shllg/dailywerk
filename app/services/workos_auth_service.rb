@@ -10,6 +10,8 @@ require "securerandom"
 # client — the authorization code never touches the browser, so PKCE is not
 # required. The `state` parameter provides OAuth CSRF protection.
 class WorkosAuthService
+  class RefreshLockUnavailableError < StandardError; end
+
   # Generates an authorization URL for WorkOS with a state nonce.
   #
   # @param redirect_uri [String] the callback URL
@@ -61,14 +63,12 @@ class WorkosAuthService
   # @return [Hash] { access_token: }
   def refresh_access_token(user_session:)
     lock_key = "refresh_lock:session_#{user_session.id}"
+    lock_acquired = false
 
     # Acquire a Valkey lock to prevent concurrent refreshes
-    acquired = Rails.cache.write(lock_key, "1", unless_exist: true, expires_in: 5.seconds)
-    unless acquired
-      # Another request is refreshing — wait briefly and retry once
-      sleep 0.5
-      acquired = Rails.cache.write(lock_key, "1", unless_exist: true, expires_in: 5.seconds)
-      raise "Refresh token lock contention" unless acquired
+    lock_acquired = Rails.cache.write(lock_key, "1", unless_exist: true, expires_in: 5.seconds)
+    unless lock_acquired
+      raise RefreshLockUnavailableError, "Refresh token lock contention"
     end
 
     response = WorkOS::UserManagement.authenticate_with_refresh_token(
@@ -83,7 +83,7 @@ class WorkosAuthService
 
     { access_token: response.access_token }
   ensure
-    Rails.cache.delete(lock_key) if lock_key
+    Rails.cache.delete(lock_key) if lock_acquired
   end
 
   # Returns the WorkOS logout URL for ending the SSO session.

@@ -1,10 +1,9 @@
 # Canonical environment template for the repository.
 # Keep this file complete and do not add a separate .env.example.
 #
-# Empty values are stripped by bin/op-inject-env so they never poison
-# Rails (DATABASE_URL="" overrides database.yml, SECRET_KEY_BASE=""
-# overrides config/master.key, etc.).  Comment out vars that have no
-# dev default — they'll only appear in .env when op inject fills them.
+# Run commands with `op run --env-file=.env.tpl -- ...` so secret
+# references are resolved in-process instead of being written to disk.
+# Comment out vars that have no dev default.
 
 # Rails
 RAILS_ENV=development
@@ -86,6 +85,8 @@ VAULT_STRUCTURE_ANALYSIS_MODEL=gpt-5.4
 METRICS_ENABLED=true
 # METRICS_BASIC_AUTH_USERNAME=
 # METRICS_BASIC_AUTH_PASSWORD=
+# GOOD_JOB_BASIC_AUTH_USERNAME=  — op inject or manual
+# GOOD_JOB_BASIC_AUTH_PASSWORD=  — op inject or manual
 
 # Developer tooling
 SKIP_DOCKER=0

@@ -67,6 +67,23 @@ class Api::V1::AuthControllerTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
+  test "me returns 429 when another request is already refreshing the session" do
+    session = create_user_session(@user)
+    set_auth_session_cookie(session)
+
+    with_cache_store(ActiveSupport::Cache::MemoryStore.new) do
+      Rails.cache.write("refresh_lock:session_#{session.id}", "1", unless_exist: true, expires_in: 5.seconds)
+
+      get "/api/v1/auth/me"
+    end
+
+    assert_response :too_many_requests
+    assert_equal "1", response.headers["Retry-After"]
+    body = JSON.parse(response.body)
+
+    assert_equal "Refresh already in progress", body["error"]
+  end
+
   # -- refresh --
 
   test "refresh with valid session and X-Requested-With returns new token" do
@@ -91,6 +108,23 @@ class Api::V1::AuthControllerTest < ActionDispatch::IntegrationTest
     post "/api/v1/auth/refresh"
 
     assert_response :bad_request
+  end
+
+  test "refresh returns 429 when another request is already refreshing the session" do
+    session = create_user_session(@user)
+    set_auth_session_cookie(session)
+
+    with_cache_store(ActiveSupport::Cache::MemoryStore.new) do
+      Rails.cache.write("refresh_lock:session_#{session.id}", "1", unless_exist: true, expires_in: 5.seconds)
+
+      post "/api/v1/auth/refresh", headers: { "X-Requested-With" => "XMLHttpRequest" }
+    end
+
+    assert_response :too_many_requests
+    assert_equal "1", response.headers["Retry-After"]
+    body = JSON.parse(response.body)
+
+    assert_equal "Refresh already in progress", body["error"]
   end
 
   # -- logout --
@@ -164,6 +198,14 @@ class Api::V1::AuthControllerTest < ActionDispatch::IntegrationTest
 
     WorkOS::UserManagement.define_singleton_method(:authenticate_with_refresh_token, @original_refresh)
     @original_refresh = nil
+  end
+
+  def with_cache_store(store)
+    original_cache = Rails.cache
+    Rails.cache = store
+    yield
+  ensure
+    Rails.cache = original_cache
   end
 end
 # rubocop:enable Minitest/MultipleAssertions

@@ -39,11 +39,8 @@ module ApplicationCable
     # @return [void]
     def authenticate_with_ticket!
       ticket = request.params[:ticket]
-      data = Rails.cache.read("ws_ticket:#{ticket}")
+      data = WebsocketTicketStore.consume(ticket)
       reject_unauthorized_connection unless data
-
-      # Delete ticket after read (one-time use)
-      Rails.cache.delete("ws_ticket:#{ticket}")
 
       parsed = JSON.parse(data)
       self.current_user = User.find(parsed["user_id"])

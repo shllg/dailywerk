@@ -43,6 +43,8 @@ module Api
           user: serialize_user(user),
           workspace: workspace ? serialize_workspace(workspace) : nil
         }
+      rescue WorkosAuthService::RefreshLockUnavailableError
+        render_refresh_retry_later
       rescue StandardError => e
         Rails.logger.warn "Auth me failed: #{e.message}"
         clear_session_cookie
@@ -64,6 +66,8 @@ module Api
         token_result = WorkosAuthService.new.refresh_access_token(user_session: session)
 
         render json: { access_token: token_result[:access_token] }
+      rescue WorkosAuthService::RefreshLockUnavailableError
+        render_refresh_retry_later
       rescue StandardError => e
         Rails.logger.warn "Auth refresh failed: #{e.message}"
         clear_session_cookie
@@ -100,9 +104,10 @@ module Api
       def websocket_ticket
         ticket = SecureRandom.urlsafe_base64(32)
 
-        Rails.cache.write(
-          "ws_ticket:#{ticket}",
-          { user_id: current_user.id, workspace_id: current_workspace.id }.to_json,
+        WebsocketTicketStore.issue(
+          ticket:,
+          user_id: current_user.id,
+          workspace_id: current_workspace.id,
           expires_in: WorkOS::DailyWerk::WS_TICKET_TTL.seconds
         )
 
@@ -136,6 +141,12 @@ module Api
       # @return [String]
       def auth_callback_url
         "#{request.protocol}#{request.host_with_port}/auth/workos/callback"
+      end
+
+      # @return [void]
+      def render_refresh_retry_later
+        response.set_header("Retry-After", "1")
+        render json: { error: "Refresh already in progress" }, status: :too_many_requests
       end
     end
   end

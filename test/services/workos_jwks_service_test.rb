@@ -126,6 +126,29 @@ class WorkosJwksServiceTest < ActiveSupport::TestCase
     restore_jwks_fetch
   end
 
+  test "fetch_jwks runs outside an async reactor" do
+    fake_response = FakeJwksResponse.new(200, { keys: [] }.to_json)
+    fake_internet = FakeInternet.new(fake_response)
+
+    original_internet_new = Async::HTTP::Internet.method(:new)
+    original_get_jwks_url = WorkOS::UserManagement.method(:get_jwks_url)
+
+    Async::HTTP::Internet.define_singleton_method(:new) do |**_kwargs|
+      fake_internet
+    end
+    WorkOS::UserManagement.define_singleton_method(:get_jwks_url) do |_client_id|
+      "https://api.workos.test/jwks"
+    end
+
+    assert_equal({ "keys" => [] }, WorkosJwksService.send(:fetch_jwks))
+    assert_equal [ "https://api.workos.test/jwks" ], fake_internet.requested_urls
+    assert_predicate fake_response, :closed?
+    assert_predicate fake_internet, :closed?
+  ensure
+    Async::HTTP::Internet.define_singleton_method(:new, original_internet_new) if original_internet_new
+    WorkOS::UserManagement.define_singleton_method(:get_jwks_url, original_get_jwks_url) if original_get_jwks_url
+  end
+
   private
 
   def build_valid_payload(overrides = {})
@@ -160,6 +183,55 @@ class WorkosJwksServiceTest < ActiveSupport::TestCase
 
     WorkosJwksService.define_singleton_method(:fetch_jwks, @original_fetch_jwks)
     @original_fetch_jwks = nil
+  end
+
+  class FakeInternet
+    attr_reader :requested_urls
+
+    def initialize(response)
+      @response = response
+      @requested_urls = []
+      @closed = false
+    end
+
+    def get(url)
+      @requested_urls << url
+      @response
+    end
+
+    def close
+      @closed = true
+    end
+
+    def closed?
+      @closed
+    end
+  end
+
+  class FakeJwksResponse
+    attr_reader :status
+
+    def initialize(status, body)
+      @status = status
+      @body = body
+      @closed = false
+    end
+
+    def success?
+      status.between?(200, 299)
+    end
+
+    def read
+      @body
+    end
+
+    def close
+      @closed = true
+    end
+
+    def closed?
+      @closed
+    end
   end
 end
 # rubocop:enable Minitest/MultipleAssertions

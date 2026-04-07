@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 require "jwt"
-require "net/http"
-require "uri"
+require "async/http/internet"
+require "kernel/sync"
 require "json"
 
 # Verifies WorkOS-issued JWTs using cached JWKS public keys.
@@ -131,12 +131,16 @@ class WorkosJwksService
       raise "WORKOS_CLIENT_ID not configured" if client_id.blank?
 
       jwks_url = WorkOS::UserManagement.get_jwks_url(client_id)
-      uri = URI.parse(jwks_url)
+      Sync do
+        internet = Async::HTTP::Internet.new
+        response = internet.get(jwks_url)
+        raise "JWKS fetch failed: HTTP #{response.status}" unless response.success?
 
-      response = Net::HTTP.get_response(uri)
-      raise "JWKS fetch failed: HTTP #{response.code}" unless response.is_a?(Net::HTTPSuccess)
-
-      JSON.parse(response.body)
+        JSON.parse(response.read)
+      ensure
+        response&.close
+        internet&.close
+      end
     end
 
     # Parses JWKS response and populates L1 + L2 caches.

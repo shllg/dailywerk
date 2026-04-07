@@ -135,6 +135,27 @@ class WorkosAuthServiceTest < ActiveSupport::TestCase
     restore_authenticate_with_code
   end
 
+  test "refresh_access_token raises a retryable error without clearing another request lock" do
+    user, = create_user_with_workspace
+    session = UserSession.create!(
+      user:,
+      refresh_token: "wos_rt_test_#{SecureRandom.hex(8)}",
+      expires_at: 30.days.from_now
+    )
+    lock_key = "refresh_lock:session_#{session.id}"
+
+    with_cache_store(ActiveSupport::Cache::MemoryStore.new) do
+      Rails.cache.write(lock_key, "1", unless_exist: true, expires_in: 5.seconds)
+
+      error = assert_raises(WorkosAuthService::RefreshLockUnavailableError) do
+        @service.refresh_access_token(user_session: session)
+      end
+
+      assert_match(/lock contention/, error.message)
+      assert_equal "1", Rails.cache.read(lock_key)
+    end
+  end
+
   private
 
   # Builds a fake WorkOS::User-like struct for testing.
@@ -165,6 +186,14 @@ class WorkosAuthServiceTest < ActiveSupport::TestCase
 
     WorkOS::UserManagement.define_singleton_method(:authenticate_with_code, @original_auth)
     @original_auth = nil
+  end
+
+  def with_cache_store(store)
+    original_cache = Rails.cache
+    Rails.cache = store
+    yield
+  ensure
+    Rails.cache = original_cache
   end
 end
 # rubocop:enable Minitest/MultipleAssertions

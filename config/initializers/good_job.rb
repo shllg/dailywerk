@@ -50,3 +50,12 @@ Rails.application.configure do
     }
   }
 end
+
+GoodJob::Engine.middleware.use Rack::Auth::Basic, "GoodJob" do |provided_username, provided_password|
+  username = ENV["GOOD_JOB_BASIC_AUTH_USERNAME"].to_s
+  password = ENV["GOOD_JOB_BASIC_AUTH_PASSWORD"].to_s
+  next false if username.blank? || password.blank?
+
+  ActiveSupport::SecurityUtils.secure_compare(provided_username, username) &&
+    ActiveSupport::SecurityUtils.secure_compare(provided_password, password)
+end
