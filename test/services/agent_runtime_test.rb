@@ -139,7 +139,7 @@ class AgentRuntimeTest < ActiveSupport::TestCase
     params_call = session.calls.find { |c| c.first == :with_params }
 
     assert_not_nil params_call, "Expected with_params to be called"
-    assert_equal({ max_tokens: 1000, top_p: 0.9 }, params_call.last)
+    assert_equal({ max_output_tokens: 1000, top_p: 0.9 }, params_call.last)
   ensure
     ContextBuilder.define_singleton_method(:new, original_builder)
   end

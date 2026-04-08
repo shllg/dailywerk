@@ -1,8 +1,4 @@
-import {
-  type Dispatch,
-  type SetStateAction,
-  useCallback,
-} from 'react'
+import { type Dispatch, type SetStateAction, useCallback } from 'react'
 import type { Message } from '../types/chat'
 import { sendMessage as sendChatMessage } from '../services/chatApi'
 import { useCableSubscription } from './useCableSubscription'
@@ -38,17 +34,19 @@ export function useActionCableChat(
     resetStreamingState,
   } = useStreamingState(defaultAgentName)
 
+  const onTicketError = useCallback(() => {
+    appendAssistantError(
+      'Failed to connect to live updates. Please refresh and try again.',
+    )
+    resetStreamingState()
+  }, [appendAssistantError, resetStreamingState])
+
   useCableSubscription({
     sessionId,
     token,
     onDisconnected: resetStreamingState,
     onReceived: handleCableEvent,
-    onTicketError: () => {
-      appendAssistantError(
-        'Failed to connect to live updates. Please refresh and try again.',
-      )
-      resetStreamingState()
-    },
+    onTicketError,
   })
 
   const sendMessage = useCallback(

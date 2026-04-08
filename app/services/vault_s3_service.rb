@@ -135,6 +135,8 @@ class VaultS3Service
 
   # @return [Hash]
   def sse_c_headers
+    return {} unless sse_c_enabled?
+
     key = @vault.sse_customer_key
 
     {
@@ -142,6 +144,14 @@ class VaultS3Service
       sse_customer_key: key,
       sse_customer_key_md5: Digest::MD5.base64digest(key)
     }
+  end
+
+  # SSE-CPK is enabled unless explicitly disabled via config.
+  # Production/staging: always true (default). Dev/test: false (RustFS has no SSE-CPK support).
+  #
+  # @return [Boolean]
+  def sse_c_enabled?
+    Rails.configuration.x.vault_s3_require_https_for_sse_cpk != false
   end
 
   # @return [String]
@@ -178,22 +188,8 @@ class VaultS3Service
         Rails.application.credentials.dig(:hetzner_s3, :endpoint) ||
         Rails.application.credentials.dig(:rustfs, :endpoint) ||
         Rails.application.credentials.dig(:vault_s3, :endpoint),
-      force_path_style: ActiveModel::Type::Boolean.new.cast(ENV.fetch("AWS_FORCE_PATH_STYLE", "true")),
-      require_https_for_sse_cpk: require_https_for_sse_cpk?
+      force_path_style: ActiveModel::Type::Boolean.new.cast(ENV.fetch("AWS_FORCE_PATH_STYLE", "true"))
     }.compact
-  end
-
-  # @return [Boolean]
-  def require_https_for_sse_cpk?
-    configured_value = Rails.configuration.x.vault_s3_require_https_for_sse_cpk
-    return configured_value unless configured_value.nil?
-
-    endpoint = Rails.configuration.x.vault_s3_endpoint.presence
-    return true if endpoint.blank?
-
-    URI.parse(endpoint).scheme != "http"
-  rescue URI::InvalidURIError
-    true
   end
 
   # @return [Array<String>]

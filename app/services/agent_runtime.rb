@@ -59,6 +59,8 @@ class AgentRuntime
   end
 
   # Applies optional generation parameters from agent.params.
+  # Translates `max_tokens` to `max_output_tokens` for the OpenAI Responses API
+  # provider, which uses a different parameter name.
   #
   # @param session [Object] the runtime session
   # @return [Object]
@@ -71,7 +73,16 @@ class AgentRuntime
     ).compact
     return session if supported.empty?
 
+    if supported.key?("max_tokens") && responses_api_provider?
+      supported["max_output_tokens"] = supported.delete("max_tokens")
+    end
+
     session.with_params(**supported.symbolize_keys)
+  end
+
+  # @return [Boolean]
+  def responses_api_provider?
+    (@agent.resolved_provider || DEFAULT_PROVIDER) == :openai_responses
   end
 
   # Enqueues background compaction once the active context window crosses the threshold.
