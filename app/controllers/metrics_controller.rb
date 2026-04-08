@@ -16,13 +16,14 @@ class MetricsController < ActionController::API
 
   # @return [void]
   def ensure_metrics_enabled!
-    head :not_found unless ActiveModel::Type::Boolean.new.cast(ENV.fetch("METRICS_ENABLED", "false"))
+    head :not_found unless Rails.configuration.x.metrics.enabled
   end
 
   # @return [void]
   def authenticate!
-    username = ENV["METRICS_BASIC_AUTH_USERNAME"].to_s
-    password = ENV["METRICS_BASIC_AUTH_PASSWORD"].to_s
+    username = Rails.configuration.x.metrics.basic_auth_username.to_s
+    password = Rails.configuration.x.metrics.basic_auth_password.to_s
+
     if username.blank? || password.blank?
       return if !Rails.env.production? && username.blank? && password.blank?
 

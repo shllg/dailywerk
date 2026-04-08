@@ -4,15 +4,15 @@ require "test_helper"
 
 class GoodJobDashboardAuthTest < ActionDispatch::IntegrationTest
   setup do
-    @previous_username = ENV["GOOD_JOB_BASIC_AUTH_USERNAME"]
-    @previous_password = ENV["GOOD_JOB_BASIC_AUTH_PASSWORD"]
-    ENV["GOOD_JOB_BASIC_AUTH_USERNAME"] = ""
-    ENV["GOOD_JOB_BASIC_AUTH_PASSWORD"] = ""
+    @previous_username = Rails.configuration.x.good_job.basic_auth_username
+    @previous_password = Rails.configuration.x.good_job.basic_auth_password
+    Rails.configuration.x.good_job.basic_auth_username = nil
+    Rails.configuration.x.good_job.basic_auth_password = nil
   end
 
   teardown do
-    ENV["GOOD_JOB_BASIC_AUTH_USERNAME"] = @previous_username
-    ENV["GOOD_JOB_BASIC_AUTH_PASSWORD"] = @previous_password
+    Rails.configuration.x.good_job.basic_auth_username = @previous_username
+    Rails.configuration.x.good_job.basic_auth_password = @previous_password
   end
 
   test "requires basic auth even when dashboard credentials are unset" do
@@ -22,8 +22,8 @@ class GoodJobDashboardAuthTest < ActionDispatch::IntegrationTest
   end
 
   test "allows access with correct basic auth credentials" do
-    ENV["GOOD_JOB_BASIC_AUTH_USERNAME"] = "goodjob"
-    ENV["GOOD_JOB_BASIC_AUTH_PASSWORD"] = "secret"
+    Rails.configuration.x.good_job.basic_auth_username = "goodjob"
+    Rails.configuration.x.good_job.basic_auth_password = "secret"
 
     credentials = ActionController::HttpAuthentication::Basic.encode_credentials("goodjob", "secret")
     get "/good_job", headers: { "Authorization" => credentials }

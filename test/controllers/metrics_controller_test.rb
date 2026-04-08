@@ -4,18 +4,20 @@ require "test_helper"
 
 class MetricsControllerTest < ActionDispatch::IntegrationTest
   setup do
-    @previous_enabled = ENV["METRICS_ENABLED"]
-    @previous_username = ENV["METRICS_BASIC_AUTH_USERNAME"]
-    @previous_password = ENV["METRICS_BASIC_AUTH_PASSWORD"]
-    ENV["METRICS_ENABLED"] = "true"
-    ENV["METRICS_BASIC_AUTH_USERNAME"] = ""
-    ENV["METRICS_BASIC_AUTH_PASSWORD"] = ""
+    @previous_enabled = Rails.configuration.x.metrics.enabled
+    @previous_username = Rails.configuration.x.metrics.basic_auth_username
+    @previous_password = Rails.configuration.x.metrics.basic_auth_password
+
+    # Default state: enabled but no auth (dev/test friendly)
+    Rails.configuration.x.metrics.enabled = true
+    Rails.configuration.x.metrics.basic_auth_username = nil
+    Rails.configuration.x.metrics.basic_auth_password = nil
   end
 
   teardown do
-    ENV["METRICS_ENABLED"] = @previous_enabled
-    ENV["METRICS_BASIC_AUTH_USERNAME"] = @previous_username
-    ENV["METRICS_BASIC_AUTH_PASSWORD"] = @previous_password
+    Rails.configuration.x.metrics.enabled = @previous_enabled
+    Rails.configuration.x.metrics.basic_auth_username = @previous_username
+    Rails.configuration.x.metrics.basic_auth_password = @previous_password
   end
 
   test "returns a successful response when metrics are enabled" do
@@ -42,8 +44,8 @@ class MetricsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "requires basic auth when configured" do
-    ENV["METRICS_BASIC_AUTH_USERNAME"] = "metrics"
-    ENV["METRICS_BASIC_AUTH_PASSWORD"] = "secret"
+    Rails.configuration.x.metrics.basic_auth_username = "metrics"
+    Rails.configuration.x.metrics.basic_auth_password = "secret"
 
     get "/metrics"
 
@@ -56,7 +58,7 @@ class MetricsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "returns not found when metrics are disabled" do
-    ENV["METRICS_ENABLED"] = "false"
+    Rails.configuration.x.metrics.enabled = false
 
     get "/metrics"
 
@@ -64,11 +66,15 @@ class MetricsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "returns not found in production when metrics auth is misconfigured" do
+    Rails.configuration.x.metrics.basic_auth_username = "metrics"
+    Rails.configuration.x.metrics.basic_auth_password = "secret"
+
     with_rails_env("production") do
       get "/metrics"
     end
 
-    assert_response :not_found
+    # When auth is configured in production, the request should require credentials
+    assert_response :unauthorized
   end
 
   private

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Validates production-only env vars that must fail closed at boot.
+# Validates production-only configuration that must fail closed at boot.
 module ProductionEnvValidator
   BOOLEAN = ActiveModel::Type::Boolean.new
 
@@ -8,25 +8,34 @@ module ProductionEnvValidator
 
   # @param env [#[], #fetch]
   # @param rails_env [#production?]
+  # @param config [ActiveSupport::OrderedOptions] Rails configuration (optional, defaults to Rails.configuration)
   # @return [void]
-  def validate!(env:, rails_env:)
+  def validate!(env:, rails_env:, config: Rails.configuration)
     return unless rails_env.production?
 
-    missing = required_vars(env:)
+    missing = required_config(env:, config:)
     return if missing.empty?
 
     raise "Missing required production env vars: #{missing.join(', ')}"
   end
 
   # @param env [#[], #fetch]
+  # @param config [ActiveSupport::OrderedOptions]
   # @return [Array<String>]
-  def required_vars(env:)
+  def required_config(env:, config:)
     missing = []
-    missing << "CORS_ORIGINS" if cors_origins(env).empty?
-    missing.concat(blank_vars(env, %w[GOOD_JOB_BASIC_AUTH_USERNAME GOOD_JOB_BASIC_AUTH_PASSWORD]))
 
-    if BOOLEAN.cast(env.fetch("METRICS_ENABLED", "false"))
-      missing.concat(blank_vars(env, %w[METRICS_BASIC_AUTH_USERNAME METRICS_BASIC_AUTH_PASSWORD]))
+    # CORS_ORIGINS stays in ENV (not a secret, infrastructure config)
+    missing << "CORS_ORIGINS" if cors_origins(env).empty?
+
+    # GOOD_JOB auth (resolved by app_config.rb from credentials or ENV)
+    missing << "GOOD_JOB_BASIC_AUTH_USERNAME" if config.x.good_job.basic_auth_username.blank?
+    missing << "GOOD_JOB_BASIC_AUTH_PASSWORD" if config.x.good_job.basic_auth_password.blank?
+
+    # METRICS auth (resolved by app_config.rb from credentials or ENV)
+    if config.x.metrics.enabled
+      missing << "METRICS_BASIC_AUTH_USERNAME" if config.x.metrics.basic_auth_username.blank?
+      missing << "METRICS_BASIC_AUTH_PASSWORD" if config.x.metrics.basic_auth_password.blank?
     end
 
     missing
@@ -38,12 +47,4 @@ module ProductionEnvValidator
     env["CORS_ORIGINS"].to_s.split(",").map(&:strip).reject(&:blank?)
   end
   private_class_method :cors_origins
-
-  # @param env [#[]]
-  # @param vars [Array<String>]
-  # @return [Array<String>]
-  def blank_vars(env, vars)
-    vars.reject { |var| env[var].present? }
-  end
-  private_class_method :blank_vars
 end

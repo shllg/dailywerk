@@ -19,17 +19,13 @@ class WorkosJwksServiceTest < ActiveSupport::TestCase
     WorkosJwksService.reset_rate_limit!
 
     # Ensure client_id returns our test value
-    @original_client_id = ENV["WORKOS_CLIENT_ID"]
-    ENV["WORKOS_CLIENT_ID"] = TEST_CLIENT_ID
+    @original_client_id = Rails.configuration.x.workos.client_id
+    Rails.configuration.x.workos.client_id = TEST_CLIENT_ID
   end
 
   teardown do
     WorkosJwksService::KEYS.each_key { |k| WorkosJwksService::KEYS.delete(k) }
-    if @original_client_id
-      ENV["WORKOS_CLIENT_ID"] = @original_client_id
-    else
-      ENV.delete("WORKOS_CLIENT_ID")
-    end
+    Rails.configuration.x.workos.client_id = @original_client_id
   end
 
   test "verifies a valid JWT and returns payload" do

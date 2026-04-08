@@ -59,9 +59,9 @@ module Webhooks
         return head :unauthorized
       end
 
-      secret = ENV["WORKOS_WEBHOOK_SECRET"]
+      secret = Rails.configuration.x.workos.webhook_secret
       if secret.blank?
-        Rails.logger.error "WorkOS webhook: WORKOS_WEBHOOK_SECRET not configured"
+        Rails.logger.error "WorkOS webhook: webhook_secret not configured"
         return head :internal_server_error
       end
 

@@ -14,7 +14,8 @@ APP_ENVIRONMENT=development
 # BUILD_SHA=              — set by CI/deploy only
 # BUILD_REF=              — set by CI/deploy only
 # SECRET_KEY_BASE=        — dev reads config/master.key; set in production only
-# RAILS_MASTER_KEY=       — dev reads config/master.key; set in production only
+# Development master key (staging/production use shllg vault, see bin/credentials-edit)
+RAILS_MASTER_KEY=op://DailyWerk/dailywerk-dev-env/rails-master-key
 # ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY=
 # ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY=
 # ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT=
@@ -73,13 +74,14 @@ VITE_PORT=5173
 VITE_API_PORT=3000
 
 # Third-party auth / billing / AI
-WORKOS_API_KEY=op://DailyWerk/dailywerk-dev-env/workos-api-key
-WORKOS_CLIENT_ID=op://DailyWerk/dailywerk-dev-env/workos-client-id
-WORKOS_WEBHOOK_SECRET=op://DailyWerk/dailywerk-dev-env/workos-webhook-secret
-# STRIPE_SECRET_KEY=      — op inject or manual
-# STRIPE_WEBHOOK_SECRET=  — op inject or manual
-# STRIPE_PUBLISHABLE_KEY= — op inject or manual
-OPENAI_API_KEY=op://DailyWerk/dailywerk-dev-env/openai-api-key
+# These are now stored in Rails encrypted credentials. Set ENV vars here to override.
+# WORKOS_API_KEY=
+# WORKOS_CLIENT_ID=
+# WORKOS_WEBHOOK_SECRET=
+# STRIPE_SECRET_KEY=
+# STRIPE_WEBHOOK_SECRET=
+# STRIPE_PUBLISHABLE_KEY=
+# OPENAI_API_KEY=
 VAULT_STRUCTURE_ANALYSIS_MODEL=gpt-5.4
 
 # Metrics and diagnostics

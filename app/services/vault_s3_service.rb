@@ -151,44 +151,23 @@ class VaultS3Service
   #
   # @return [Boolean]
   def sse_c_enabled?
-    Rails.configuration.x.vault_s3_require_https_for_sse_cpk != false
+    Rails.configuration.x.vault_s3.require_https_for_sse_cpk != false
   end
 
   # @return [String]
   def configured_bucket
-    Rails.configuration.x.vault_s3_bucket.presence ||
-      ENV["S3_BUCKET"].presence ||
-      Rails.application.credentials.dig(:hetzner_s3, :bucket) ||
-      Rails.application.credentials.dig(:rustfs, :bucket) ||
-      Rails.application.credentials.dig(:vault_s3, :bucket) ||
-      ENV.fetch("RUSTFS_BUCKET", "dailywerk-dev")
+    Rails.configuration.x.vault_s3.bucket
   end
 
   # @return [Hash]
   def s3_config
+    cfg = Rails.configuration.x.vault_s3
     {
-      access_key_id: ENV["AWS_ACCESS_KEY_ID"].presence ||
-        Rails.application.credentials.dig(:hetzner_s3, :access_key) ||
-        Rails.application.credentials.dig(:rustfs, :access_key) ||
-        Rails.application.credentials.dig(:vault_s3, :access_key_id) ||
-        ENV.fetch("RUSTFS_ACCESS_KEY", "rustfsadmin"),
-      secret_access_key: ENV["AWS_SECRET_ACCESS_KEY"].presence ||
-        Rails.application.credentials.dig(:hetzner_s3, :secret_key) ||
-        Rails.application.credentials.dig(:rustfs, :secret_key) ||
-        Rails.application.credentials.dig(:vault_s3, :secret_access_key) ||
-        ENV.fetch("RUSTFS_SECRET_KEY", "rustfsadmin"),
-      region: ENV["AWS_REGION"].presence ||
-        Rails.configuration.x.vault_s3_region.presence ||
-        Rails.application.credentials.dig(:hetzner_s3, :region) ||
-        Rails.application.credentials.dig(:rustfs, :region) ||
-        Rails.application.credentials.dig(:vault_s3, :region) ||
-        "us-east-1",
-      endpoint: ENV["AWS_ENDPOINT"].presence ||
-        Rails.configuration.x.vault_s3_endpoint.presence ||
-        Rails.application.credentials.dig(:hetzner_s3, :endpoint) ||
-        Rails.application.credentials.dig(:rustfs, :endpoint) ||
-        Rails.application.credentials.dig(:vault_s3, :endpoint),
-      force_path_style: ActiveModel::Type::Boolean.new.cast(ENV.fetch("AWS_FORCE_PATH_STYLE", "true"))
+      access_key_id: cfg.access_key,
+      secret_access_key: cfg.secret_key,
+      region: cfg.region,
+      endpoint: cfg.endpoint,
+      force_path_style: cfg.force_path_style
     }.compact
   end
 

@@ -4,6 +4,9 @@ require_relative "../../lib/structured_log_formatter"
 Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb.
 
+  # Require master key for encrypted credentials in production.
+  config.require_master_key = true
+
   # Code is not reloaded between requests.
   config.enable_reloading = false
 
@@ -78,14 +81,6 @@ Rails.application.configure do
 
   config.action_cable.url = "wss://#{ENV.fetch("APP_HOST")}/cable"
   config.action_cable.allowed_request_origins = ENV.fetch("ACTION_CABLE_ALLOWED_ORIGINS", "").split(",").map(&:strip).reject(&:blank?)
-
-  config.x.vault_s3_bucket = ENV["S3_BUCKET"].presence || ENV["VAULT_S3_BUCKET"]
-  config.x.vault_s3_endpoint = ENV["AWS_ENDPOINT"].presence || ENV["VAULT_S3_ENDPOINT"]
-  config.x.vault_s3_region = ENV["AWS_REGION"].presence || ENV.fetch("VAULT_S3_REGION", "fsn1")
-  config.x.vault_s3_require_https_for_sse_cpk = ActiveModel::Type::Boolean.new.cast(
-    ENV.fetch("S3_REQUIRE_HTTPS_FOR_SSE_CPK") { ENV.fetch("VAULT_S3_REQUIRE_HTTPS_FOR_SSE_CPK", "true") }
-  )
-  config.x.vault_local_base = ENV.fetch("VAULT_LOCAL_BASE", "/data/workspaces")
 
   # Do not dump schema after migrations.
   config.active_record.dump_schema_after_migration = false

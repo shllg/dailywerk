@@ -57,8 +57,8 @@ GoodJob::Engine.middleware.use ActionDispatch::Flash
 GoodJob::Engine.middleware.use Rack::MethodOverride
 
 GoodJob::Engine.middleware.use Rack::Auth::Basic, "GoodJob" do |provided_username, provided_password|
-  username = ENV["GOOD_JOB_BASIC_AUTH_USERNAME"].to_s
-  password = ENV["GOOD_JOB_BASIC_AUTH_PASSWORD"].to_s
+  username = Rails.configuration.x.good_job.basic_auth_username.to_s
+  password = Rails.configuration.x.good_job.basic_auth_password.to_s
   next false if username.blank? || password.blank?
 
   ActiveSupport::SecurityUtils.secure_compare(provided_username, username) &&

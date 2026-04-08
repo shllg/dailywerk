@@ -31,5 +31,10 @@
 docs/.obsidian
 
 # Ignore key files for decrypting credentials and more.
+/config/*.key
 /config/credentials/*.key
+
+# Per-environment credentials — only development.yml.enc is tracked
+/config/credentials/*.yml.enc
+!/config/credentials/development.yml.enc
 

@@ -3,15 +3,40 @@
 require "test_helper"
 
 class ProductionEnvValidatorTest < ActiveSupport::TestCase
-  test "does nothing outside production" do
-    assert_nil ProductionEnvValidator.validate!(env: {}, rails_env: ActiveSupport::StringInquirer.new("development"))
+  # Simple struct-based config mock for testing
+  GoodJobConfig = Struct.new(:basic_auth_username, :basic_auth_password, keyword_init: true)
+  MetricsConfig = Struct.new(:enabled, :basic_auth_username, :basic_auth_password, keyword_init: true)
+  ConfigX = Struct.new(:good_job, :metrics, keyword_init: true)
+  MockConfig = Struct.new(:x, keyword_init: true)
+
+  def mock_config(good_job_username: "goodjob", good_job_password: "secret",
+                  metrics_enabled: true, metrics_username: "metrics", metrics_password: "secret")
+    good_job = GoodJobConfig.new(
+      basic_auth_username: good_job_username,
+      basic_auth_password: good_job_password
+    )
+    metrics = MetricsConfig.new(
+      enabled: metrics_enabled,
+      basic_auth_username: metrics_username,
+      basic_auth_password: metrics_password
+    )
+    MockConfig.new(x: ConfigX.new(good_job: good_job, metrics: metrics))
   end
 
-  test "allows production boot when required env vars are present" do
+  test "does nothing outside production" do
+    assert_nil ProductionEnvValidator.validate!(
+      env: {},
+      rails_env: ActiveSupport::StringInquirer.new("development"),
+      config: mock_config
+    )
+  end
+
+  test "allows production boot when required config is present" do
     assert_nil(
       ProductionEnvValidator.validate!(
-        env: valid_env,
-        rails_env: ActiveSupport::StringInquirer.new("production")
+        env: { "CORS_ORIGINS" => "https://app.example.com" },
+        rails_env: ActiveSupport::StringInquirer.new("production"),
+        config: mock_config
       )
     )
   end
@@ -19,12 +44,9 @@ class ProductionEnvValidatorTest < ActiveSupport::TestCase
   test "allows blank metrics auth when metrics are disabled" do
     assert_nil(
       ProductionEnvValidator.validate!(
-        env: valid_env.merge(
-          "METRICS_ENABLED" => "false",
-          "METRICS_BASIC_AUTH_USERNAME" => "",
-          "METRICS_BASIC_AUTH_PASSWORD" => ""
-        ),
-        rails_env: ActiveSupport::StringInquirer.new("production")
+        env: { "CORS_ORIGINS" => "https://app.example.com" },
+        rails_env: ActiveSupport::StringInquirer.new("production"),
+        config: mock_config(metrics_enabled: false, metrics_username: nil, metrics_password: nil)
       )
     )
   end
@@ -32,8 +54,9 @@ class ProductionEnvValidatorTest < ActiveSupport::TestCase
   test "raises when cors origins are missing in production" do
     error = assert_raises(RuntimeError) do
       ProductionEnvValidator.validate!(
-        env: valid_env.except("CORS_ORIGINS"),
-        rails_env: ActiveSupport::StringInquirer.new("production")
+        env: {},
+        rails_env: ActiveSupport::StringInquirer.new("production"),
+        config: mock_config
       )
     end
 
@@ -43,8 +66,9 @@ class ProductionEnvValidatorTest < ActiveSupport::TestCase
   test "raises when good job auth is missing in production" do
     error = assert_raises(RuntimeError) do
       ProductionEnvValidator.validate!(
-        env: valid_env.merge("GOOD_JOB_BASIC_AUTH_PASSWORD" => ""),
-        rails_env: ActiveSupport::StringInquirer.new("production")
+        env: { "CORS_ORIGINS" => "https://app.example.com" },
+        rails_env: ActiveSupport::StringInquirer.new("production"),
+        config: mock_config(good_job_password: nil)
       )
     end
 
@@ -54,24 +78,12 @@ class ProductionEnvValidatorTest < ActiveSupport::TestCase
   test "raises when metrics auth is missing and metrics are enabled" do
     error = assert_raises(RuntimeError) do
       ProductionEnvValidator.validate!(
-        env: valid_env.merge("METRICS_BASIC_AUTH_PASSWORD" => ""),
-        rails_env: ActiveSupport::StringInquirer.new("production")
+        env: { "CORS_ORIGINS" => "https://app.example.com" },
+        rails_env: ActiveSupport::StringInquirer.new("production"),
+        config: mock_config(metrics_password: nil)
       )
     end
 
     assert_equal "Missing required production env vars: METRICS_BASIC_AUTH_PASSWORD", error.message
-  end
-
-  private
-
-  def valid_env
-    {
-      "CORS_ORIGINS" => "https://app.example.com",
-      "GOOD_JOB_BASIC_AUTH_USERNAME" => "goodjob",
-      "GOOD_JOB_BASIC_AUTH_PASSWORD" => "secret",
-      "METRICS_ENABLED" => "true",
-      "METRICS_BASIC_AUTH_USERNAME" => "metrics",
-      "METRICS_BASIC_AUTH_PASSWORD" => "secret"
-    }
   end
 end

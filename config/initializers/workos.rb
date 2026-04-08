@@ -3,18 +3,19 @@
 require "workos"
 
 # Configure WorkOS SDK for authentication.
+# Values are resolved by config/initializers/app_config.rb into config.x.workos.*
 WorkOS.configure do |config|
-  config.key = ENV.fetch("WORKOS_API_KEY") do
-    Rails.logger.warn "WORKOS_API_KEY not set — WorkOS authentication disabled"
-    "test_key" if Rails.env.test?
-  end
+  config.key = Rails.configuration.x.workos.api_key || "test_key"
 end
 
-# Validate required env vars in non-test environments (warn, don't crash).
+# Validate required config in non-test environments (warn, don't crash).
 unless Rails.env.test?
-  missing = %w[WORKOS_API_KEY WORKOS_CLIENT_ID].reject { |var| ENV[var].present? }
+  missing = []
+  missing << "WORKOS_API_KEY (or credentials.workos.api_key)" if Rails.configuration.x.workos.api_key.blank?
+  missing << "WORKOS_CLIENT_ID (or credentials.workos.client_id)" if Rails.configuration.x.workos.client_id.blank?
+
   if missing.any?
-    Rails.logger.warn "Missing WorkOS env vars: #{missing.join(', ')}. " \
+    Rails.logger.warn "Missing WorkOS config: #{missing.join(', ')}. " \
                       "WorkOS authentication will be unavailable."
   end
 end
@@ -30,12 +31,12 @@ module WorkOS
 
     # @return [String, nil] the WorkOS client ID
     def self.client_id
-      ENV["WORKOS_CLIENT_ID"]
+      Rails.configuration.x.workos.client_id
     end
 
     # @return [Boolean] true when WorkOS credentials are configured
     def self.enabled?
-      ENV["WORKOS_API_KEY"].present? && ENV["WORKOS_CLIENT_ID"].present?
+      Rails.configuration.x.workos.api_key.present? && Rails.configuration.x.workos.client_id.present?
     end
   end
 end
