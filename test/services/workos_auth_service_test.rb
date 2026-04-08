@@ -6,16 +6,12 @@ require "test_helper"
 class WorkosAuthServiceTest < ActiveSupport::TestCase
   setup do
     @service = WorkosAuthService.new
-    @original_client_id = ENV["WORKOS_CLIENT_ID"]
-    ENV["WORKOS_CLIENT_ID"] = "client_test_123"
+    @original_client_id = Rails.configuration.x.workos.client_id
+    Rails.configuration.x.workos.client_id = "client_test_123"
   end
 
   teardown do
-    if @original_client_id
-      ENV["WORKOS_CLIENT_ID"] = @original_client_id
-    else
-      ENV.delete("WORKOS_CLIENT_ID")
-    end
+    Rails.configuration.x.workos.client_id = @original_client_id
   end
 
   test "authorization_url returns URL with state nonce" do

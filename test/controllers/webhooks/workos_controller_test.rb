@@ -8,19 +8,15 @@ class Webhooks::WorkosControllerTest < ActionDispatch::IntegrationTest
 
   setup do
     @webhook_secret = "whsec_test_#{SecureRandom.hex(16)}"
-    @original_secret = ENV["WORKOS_WEBHOOK_SECRET"]
-    ENV["WORKOS_WEBHOOK_SECRET"] = @webhook_secret
+    @original_secret = Rails.configuration.x.workos.webhook_secret
+    Rails.configuration.x.workos.webhook_secret = @webhook_secret
 
     @original_queue_adapter = ActiveJob::Base.queue_adapter
     ActiveJob::Base.queue_adapter = :test
   end
 
   teardown do
-    if @original_secret
-      ENV["WORKOS_WEBHOOK_SECRET"] = @original_secret
-    else
-      ENV.delete("WORKOS_WEBHOOK_SECRET")
-    end
+    Rails.configuration.x.workos.webhook_secret = @original_secret
 
     clear_enqueued_jobs
     clear_performed_jobs

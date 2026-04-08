@@ -5,16 +5,12 @@ require "test_helper"
 # rubocop:disable Minitest/MultipleAssertions
 class Auth::CallbacksControllerTest < ActionDispatch::IntegrationTest
   setup do
-    @original_client_id = ENV["WORKOS_CLIENT_ID"]
-    ENV["WORKOS_CLIENT_ID"] = "client_test_123"
+    @original_client_id = Rails.configuration.x.workos.client_id
+    Rails.configuration.x.workos.client_id = "client_test_123"
   end
 
   teardown do
-    if @original_client_id
-      ENV["WORKOS_CLIENT_ID"] = @original_client_id
-    else
-      ENV.delete("WORKOS_CLIENT_ID")
-    end
+    Rails.configuration.x.workos.client_id = @original_client_id
     restore_authenticate_with_code
   end
 

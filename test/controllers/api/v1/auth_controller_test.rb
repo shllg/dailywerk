@@ -6,16 +6,12 @@ require "test_helper"
 class Api::V1::AuthControllerTest < ActionDispatch::IntegrationTest
   setup do
     @user, @workspace = create_user_with_workspace
-    @original_client_id = ENV["WORKOS_CLIENT_ID"]
-    ENV["WORKOS_CLIENT_ID"] = "client_test_123"
+    @original_client_id = Rails.configuration.x.workos.client_id
+    Rails.configuration.x.workos.client_id = "client_test_123"
   end
 
   teardown do
-    if @original_client_id
-      ENV["WORKOS_CLIENT_ID"] = @original_client_id
-    else
-      ENV.delete("WORKOS_CLIENT_ID")
-    end
+    Rails.configuration.x.workos.client_id = @original_client_id
   end
 
   # -- provider --
