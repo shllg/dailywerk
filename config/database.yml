@@ -15,6 +15,10 @@ test:
   <<: *default
   database: <%= ENV.fetch("DB_NAME_TEST") { "dailywerk_test" } %>
 
+staging:
+  <<: *default
+  url: <%= ENV["DATABASE_URL"] %>
+
 production:
   <<: *default
   url: <%= ENV["DATABASE_URL"] %>
