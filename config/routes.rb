@@ -30,6 +30,16 @@ Rails.application.routes.draw do
       end
       resources :memory_entries, path: "memory", only: %i[index show create update destroy]
       resources :sessions, only: :create
+
+      resources :vaults, only: %i[index show create destroy] do
+        resources :files, only: %i[index show], controller: "vault_files"
+        get :search, on: :member, to: "vault_files#search"
+        resource :sync_config, only: %i[update destroy], controller: "vault_sync_configs" do
+          post :setup, on: :member
+          post :start, on: :member
+          post :stop, on: :member
+        end
+      end
     end
   end
 end

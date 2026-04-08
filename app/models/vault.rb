@@ -17,6 +17,8 @@ class Vault < ApplicationRecord
   has_many :outgoing_vault_links, through: :vault_files, source: :outgoing_links
   has_many :incoming_vault_links, through: :vault_files, source: :incoming_links
 
+  # NOTE: has_one :sync_config is defined in Phase 2 when vault_sync_configs table exists
+
   before_validation :ensure_encryption_key, on: :create
 
   validates :name, presence: true
