@@ -2,8 +2,8 @@
 type: rfc
 title: Obsidian Sync Integration
 created: 2026-03-31
-updated: 2026-03-31
-status: draft
+updated: 2026-04-09
+status: done
 implements:
   - prd/02-integrations-and-channels
 depends_on:

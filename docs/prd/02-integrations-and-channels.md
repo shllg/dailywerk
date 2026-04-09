@@ -3,7 +3,7 @@ type: prd
 title: Integrations & Channels
 domain: integrations
 created: 2026-03-28
-updated: 2026-03-31
+updated: 2026-04-09
 status: canonical
 depends_on:
   - prd/01-platform-and-infrastructure
@@ -207,6 +207,8 @@ See [PRD 06: Gmail Direct Integration](./06-gmail-direct-integration.md).
 ---
 
 ## 4. Obsidian Vault Sync
+
+> **Status:** ✅ Implemented. See [RFC: Vault Filesystem](../rfc-done/2026-03-31-vault-filesystem.md) for the data layer and [RFC: Obsidian Sync](../rfc-done/2026-03-31-obsidian-sync.md) for the sync integration. Frontend file browser available at `/vault`.
 
 ### S3 as Source of Truth, Disk as Working Copy
 

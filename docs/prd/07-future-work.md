@@ -27,9 +27,9 @@ depends_on:
 |------|--------|-------|
 | PDF-to-text pipeline | RFC: Vault Filesystem §2.1 | PDFs stored but not searchable by content. Extract text via `poppler`/`pdf-reader` gem, chunk and embed. |
 | JSON Canvas parser | RFC: Vault Filesystem §2.1 | `.canvas` files contain links to other notes (JSON format, open spec). Parse `nodes[].file` references for the backlink graph. |
-| Frontend file browser | RFC: Vault Filesystem | Files currently managed via agent tool only. Dashboard needs a tree view, file preview, and upload/download. |
+| ~~Frontend file browser~~ | ✅ RFC: Vault Filesystem | ~~Files managed via agent tool only.~~ Implemented in Phase 3: split-pane file browser with content preview at `/vault`. |
 | Multi-language FTS | RFC: Vault Filesystem §12 | tsvector currently hardcoded to `'english'`. Detect language per file and use appropriate PostgreSQL text search config. |
-| Vault dashboard file editor | RFC: Obsidian Sync §4.3 | Non-Obsidian users need a way to view and edit vault files in the web UI, not just via the agent. |
+| ~~Vault dashboard file editor~~ | ✅ RFC: Obsidian Sync §4.3 | ~~Non-Obsidian users need web UI file editing.~~ Basic file viewer implemented; full editor deferred. |
 | Multi-vault pricing | PRD 01 §8.2 | Additional vaults as paid feature. Architecture supports it (vaults table, per-vault encryption, per-agent `vault_access`). Pricing TBD. |
 | Per-file selective snapshot rollback | RFC: Vault Backup §4.2 | `restore_snapshot` accepts `paths:` param, but no UI for file selection yet. Dashboard needs a file picker for selective restore from snapshots. |
 | Cross-vault deduplication | RFC: Vault Backup §12 | Same attachment stored in two vaults = double S3 cost. Content-addressable storage layer could deduplicate. |
