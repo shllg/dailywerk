@@ -42,9 +42,9 @@ class Api::V1::VaultSyncConfigsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "bidirectional", body["sync_config"]["sync_mode"]
     assert_equal "My Second Brain", body["sync_config"]["obsidian_vault_name"]
     assert_equal "DailyWerk Server", body["sync_config"]["device_name"]
-    assert_equal true, body["sync_config"]["has_email"]
-    assert_equal true, body["sync_config"]["has_password"]
-    assert_equal true, body["sync_config"]["has_encryption_password"]
+    assert body["sync_config"]["has_email"]
+    assert body["sync_config"]["has_password"]
+    assert body["sync_config"]["has_encryption_password"]
 
     # Credentials should NOT be in the response
     refute body["sync_config"].key?("obsidian_email")
