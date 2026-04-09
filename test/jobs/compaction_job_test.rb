@@ -32,8 +32,10 @@ class CompactionJobTest < ActiveSupport::TestCase
   test "perform discards missing sessions" do
     user, workspace = create_user_with_workspace
 
-    assert_nothing_raised do
-      CompactionJob.perform_now(SecureRandom.uuid, workspace_id: workspace.id)
+    silence_expected_logs do
+      assert_nothing_raised do
+        CompactionJob.perform_now(SecureRandom.uuid, workspace_id: workspace.id)
+      end
     end
   end
 end

@@ -7,7 +7,7 @@ module Api
     class SessionsControllerTest < ActionDispatch::IntegrationTest
       setup do
         @user = User.create!(
-          email: "sascha@dailywerk.com",
+          email: "sessions-#{SecureRandom.hex(4)}@dailywerk.com",
           name: "Sascha",
           status: "active"
         )
@@ -18,7 +18,7 @@ module Api
       # rubocop:disable Minitest/MultipleAssertions
       test "creates a fake session for an active user" do
         post api_v1_sessions_url,
-             params: { session: { email: "SASCHA@DAILYWERK.COM" } },
+             params: { session: { email: @user.email.upcase } },
              as: :json
 
         assert_response :success

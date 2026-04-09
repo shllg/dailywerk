@@ -46,4 +46,12 @@ class SessionChannelTest < ActionCable::Channel::TestCase
 
     assert_predicate subscription, :rejected?
   end
+
+  test "rejects subscribing without a session id" do
+    stub_connection current_user: @user, current_workspace: @workspace
+
+    subscribe
+
+    assert_predicate subscription, :rejected?
+  end
 end

@@ -135,7 +135,9 @@ class Api::V1::VaultsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "returns 404 for non-existent vault" do
-    get "/api/v1/vaults/non-existent-id", headers: api_auth_headers(user: @user, workspace: @workspace)
+    silence_expected_logs do
+      get "/api/v1/vaults/non-existent-id", headers: api_auth_headers(user: @user, workspace: @workspace)
+    end
 
     assert_response :not_found
   end

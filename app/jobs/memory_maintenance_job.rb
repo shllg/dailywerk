@@ -39,7 +39,7 @@ class MemoryMaintenanceJob < ApplicationJob
         keeper = memories.first
         next unless keeper
 
-        memories.where.not(id: keeper.id).find_each do |duplicate|
+        memories.where.not(id: keeper.id).reorder(nil).find_each do |duplicate|
           MemoryManager.new(
             workspace: keeper.workspace,
             actor_agent: keeper.agent,

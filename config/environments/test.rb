@@ -21,6 +21,7 @@ Rails.application.configure do
   # Show full error reports.
   config.consider_all_requests_local = true
   config.cache_store = :null_store
+  config.log_level = ENV.fetch("RAILS_TEST_LOG_LEVEL", "warn").to_sym
 
   # Render exception templates for rescuable exceptions and raise for other exceptions.
   config.action_dispatch.show_exceptions = :rescuable
@@ -50,6 +51,12 @@ Rails.application.configure do
 
   # Raise error when a before_action's only/except options reference missing actions.
   config.action_controller.raise_on_missing_callback_actions = true
+
+  config.after_initialize do
+    if defined?(Console::Adapter::Rails::ActionController::LogSubscriber)
+      Console::Adapter::Rails::ActionController::LogSubscriber.detach_from(:action_controller)
+    end
+  end
 
   config.x.vault_s3_require_https_for_sse_cpk = false
 end

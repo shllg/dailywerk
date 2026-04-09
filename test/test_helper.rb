@@ -90,6 +90,14 @@ module ActiveSupport
       end
     end
 
+    def silence_expected_logs(level: Logger::FATAL)
+      return yield unless Rails.logger.respond_to?(:silence)
+
+      Rails.logger.silence(level) do
+        yield
+      end
+    end
+
     # Test RSA keypair for WorkOS JWT verification tests.
     TEST_JWKS_KEYPAIR = OpenSSL::PKey::RSA.generate(2048)
     TEST_JWKS_KID = "test-jwks-kid"

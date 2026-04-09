@@ -1,6 +1,7 @@
 # Ruby / Rails
 /.bundle
 /vendor/bundle
+/coverage/*
 /log/*
 /tmp/*
 !/log/.keep

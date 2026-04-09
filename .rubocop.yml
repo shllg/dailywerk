@@ -1,4 +1,5 @@
-inherit_gem: { rubocop-rails-omakase: rubocop.yml }
+inherit_gem:
+  rubocop-rails-omakase: rubocop.yml
 
 plugins:
   - rubocop-minitest
@@ -10,3 +11,6 @@ AllCops:
     - db/migrate/**/*
     - vendor/**/*
     - frontend/**/*
+
+Minitest/MultipleAssertions:
+  Max: 10

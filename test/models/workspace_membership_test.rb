@@ -4,7 +4,7 @@ require "test_helper"
 
 class WorkspaceMembershipTest < ActiveSupport::TestCase
   test "prevents duplicate memberships for the same user and workspace" do
-    user = User.create!(email: "sascha@dailywerk.com", name: "Sascha", status: "active")
+    user = User.create!(email: "membership-#{SecureRandom.hex(4)}@dailywerk.com", name: "Sascha", status: "active")
     workspace = Workspace.create!(name: "Personal", owner: user)
 
     WorkspaceMembership.create!(workspace:, user:, role: "owner")
@@ -15,7 +15,7 @@ class WorkspaceMembershipTest < ActiveSupport::TestCase
   end
 
   test "requires a known role" do
-    user = User.create!(email: "sascha@dailywerk.com", name: "Sascha", status: "active")
+    user = User.create!(email: "membership-role-#{SecureRandom.hex(4)}@dailywerk.com", name: "Sascha", status: "active")
     workspace = Workspace.create!(name: "Personal", owner: user)
     membership = WorkspaceMembership.new(workspace:, user:, role: "guest")
 

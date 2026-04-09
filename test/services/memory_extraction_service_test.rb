@@ -94,7 +94,11 @@ class MemoryExtractionServiceTest < ActiveSupport::TestCase
       raise "provider error"
     end
 
-    assert_equal [], MemoryExtractionService.new(session:).extract("Something important")
+    result = silence_expected_logs do
+      MemoryExtractionService.new(session:).extract("Something important")
+    end
+
+    assert_equal [], result
   ensure
     RubyLLM.define_singleton_method(:chat, original_chat)
   end

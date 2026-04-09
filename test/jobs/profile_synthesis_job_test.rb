@@ -44,10 +44,14 @@ class ProfileSynthesisJobTest < ActiveSupport::TestCase
       )
     end
 
-    ProfileSynthesisJob.perform_now
+    silence_expected_logs do
+      ProfileSynthesisJob.perform_now
+    end
 
-    assert_equal [ owner.id, teammate.id ].sort, observations.map { |entry| entry[:user_id] }.sort
-    observations.each do |entry|
+    workspace_observations = observations.select { |entry| entry[:workspace_id] == workspace.id }
+
+    assert_equal [ owner.id, teammate.id ].sort, workspace_observations.map { |entry| entry[:user_id] }.sort
+    workspace_observations.each do |entry|
       assert_equal entry[:user_id], entry[:current_user_id]
       assert_equal entry[:workspace_id], entry[:current_workspace_id]
     end

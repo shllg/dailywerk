@@ -108,8 +108,10 @@ class ChatStreamJobTest < ActiveSupport::TestCase
         broadcasts << [ stream, payload ]
       end
 
-      assert_raises(RuntimeError) do
-        ChatStreamJob.perform_now(session.id, "Hello", workspace_id: workspace.id)
+      silence_expected_logs do
+        assert_raises(RuntimeError) do
+          ChatStreamJob.perform_now(session.id, "Hello", workspace_id: workspace.id)
+        end
       end
     ensure
       AgentRuntime.define_singleton_method(:new, original_new)

@@ -9,6 +9,7 @@
 # Rails
 RAILS_ENV=development
 RAILS_LOG_LEVEL=info
+# RAILS_TEST_LOG_LEVEL=warn  # Optional test-only override; defaults to warn
 RAILS_LOG_TO_STDOUT=true
 APP_ENVIRONMENT=development
 # BUILD_SHA=              — set by CI/deploy only

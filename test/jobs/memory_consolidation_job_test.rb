@@ -48,13 +48,18 @@ class MemoryConsolidationJobTest < ActiveSupport::TestCase
       )
     end
 
-    MemoryConsolidationJob.perform_now
+    silence_expected_logs do
+      MemoryConsolidationJob.perform_now
+    end
+
+    created_workspace_ids = [ workspace_one.id, workspace_two.id ]
+    created_observations = observations.select { |entry| created_workspace_ids.include?(entry[:workspace_id]) }
 
     assert_equal(
-      [ workspace_one.id, workspace_two.id ].sort,
-      observations.map { |entry| entry[:workspace_id] }.sort
+      created_workspace_ids.sort,
+      created_observations.map { |entry| entry[:workspace_id] }.sort
     )
-    observations.each do |entry|
+    created_observations.each do |entry|
       assert_equal entry[:workspace_id], entry[:current_workspace_id]
       assert_equal entry[:workspace_id], entry[:db_workspace_id]
     end

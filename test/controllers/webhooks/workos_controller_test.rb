@@ -61,9 +61,11 @@ class Webhooks::WorkosControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "missing signature returns 401" do
-    post "/webhooks/workos",
-         params: { event: "user.updated", data: {} }.to_json,
-         headers: { "Content-Type" => "application/json" }
+    silence_expected_logs do
+      post "/webhooks/workos",
+           params: { event: "user.updated", data: {} }.to_json,
+           headers: { "Content-Type" => "application/json" }
+    end
 
     assert_response :unauthorized
   end
@@ -71,9 +73,11 @@ class Webhooks::WorkosControllerTest < ActionDispatch::IntegrationTest
   test "invalid signature returns 401" do
     stub_verify_header_failure
 
-    post "/webhooks/workos",
-         params: { event: "user.updated", data: {} }.to_json,
-         headers: webhook_headers("invalid_signature")
+    silence_expected_logs do
+      post "/webhooks/workos",
+           params: { event: "user.updated", data: {} }.to_json,
+           headers: webhook_headers("invalid_signature")
+    end
 
     assert_response :unauthorized
   end

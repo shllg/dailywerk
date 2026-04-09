@@ -262,7 +262,8 @@ class MemoryManager
       :expires_at,
       :importance,
       :metadata,
-      :source
+      :source,
+      :visibility
     )
   end
 

@@ -199,8 +199,10 @@ class Api::V1::AgentsControllerTest < ActionDispatch::IntegrationTest
       )
     end
 
-    get "/api/v1/agents/#{other_agent.id}",
-        headers: api_auth_headers(user: @user, workspace: @workspace)
+    silence_expected_logs do
+      get "/api/v1/agents/#{other_agent.id}",
+          headers: api_auth_headers(user: @user, workspace: @workspace)
+    end
 
     assert_response :not_found
   end
