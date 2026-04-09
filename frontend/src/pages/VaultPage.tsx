@@ -224,7 +224,7 @@ export function VaultPage() {
     try {
       const data = await fetchVaultFiles(vaultId)
       setFiles(data)
-    } catch (err) {
+    } catch {
       // Silent fail - files are optional
     } finally {
       setIsLoadingFiles(false)
@@ -276,7 +276,7 @@ export function VaultPage() {
     try {
       const data = await fetchVaultFile(selectedVaultId, file.id)
       setFileContent(data.content)
-    } catch (err) {
+    } catch {
       setFileContent(null)
     } finally {
       setIsLoadingFile(false)
@@ -292,7 +292,7 @@ export function VaultPage() {
     try {
       const results = await searchVault(selectedVaultId, searchQuery.trim())
       setSearchResults(results)
-    } catch (err) {
+    } catch {
       setSearchResults([])
     } finally {
       setIsSearching(false)

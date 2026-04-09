@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require "open3"
-require " English"
+require "English"
 
 # Manages the obsidian-headless CLI process for vault sync.
 # ALL methods use blocking I/O and must ONLY be called from GoodJob workers.
