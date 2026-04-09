@@ -6,6 +6,13 @@ require "active_job/test_helper"
 class Api::V1::VaultsControllerTest < ActionDispatch::IntegrationTest
   include ActiveJob::TestHelper
 
+  FakeS3Service = Struct.new(:put_calls, keyword_init: true) do
+    def ensure_prefix! = nil
+    def put_object(path, content) = put_calls << [ path, content ]
+    def delete_prefix! = nil
+    def list_full_keys = []
+  end
+
   setup do
     @original_queue_adapter = ActiveJob::Base.queue_adapter
     ActiveJob::Base.queue_adapter = :test
@@ -13,9 +20,14 @@ class Api::V1::VaultsControllerTest < ActionDispatch::IntegrationTest
     @original_vault_local_base = Rails.configuration.x.vault_local_base
     @temp_local_base = Dir.mktmpdir("vault-controller-test")
     Rails.configuration.x.vault_local_base = @temp_local_base
+    @original_s3_new = VaultS3Service.method(:new)
+    fake_s3 = FakeS3Service.new(put_calls: [])
+    @fake_s3 = fake_s3
+    VaultS3Service.define_singleton_method(:new) { |*| fake_s3 }
   end
 
   teardown do
+    VaultS3Service.define_singleton_method(:new, @original_s3_new) if @original_s3_new
     Rails.configuration.x.vault_local_base = @original_vault_local_base
     FileUtils.rm_rf(@temp_local_base) if @temp_local_base
     clear_enqueued_jobs
