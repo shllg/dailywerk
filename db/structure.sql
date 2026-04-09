@@ -539,6 +539,36 @@ ALTER TABLE ONLY public.vault_links FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: vault_sync_configs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vault_sync_configs (
+    id uuid DEFAULT public.gen_random_uuid_v7() NOT NULL,
+    vault_id uuid NOT NULL,
+    workspace_id uuid NOT NULL,
+    sync_type character varying DEFAULT 'obsidian'::character varying NOT NULL,
+    sync_mode character varying DEFAULT 'bidirectional'::character varying NOT NULL,
+    obsidian_email_enc text,
+    obsidian_password_enc text,
+    obsidian_encryption_password_enc text,
+    obsidian_vault_name character varying,
+    device_name character varying,
+    process_status character varying DEFAULT 'stopped'::character varying NOT NULL,
+    process_pid integer,
+    process_host character varying,
+    last_sync_at timestamp(6) without time zone,
+    last_health_check_at timestamp(6) without time zone,
+    consecutive_failures integer DEFAULT 0 NOT NULL,
+    error_message character varying,
+    settings jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+ALTER TABLE ONLY public.vault_sync_configs FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: vaults; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -761,6 +791,14 @@ ALTER TABLE ONLY public.vault_links
 
 
 --
+-- Name: vault_sync_configs vault_sync_configs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vault_sync_configs
+    ADD CONSTRAINT vault_sync_configs_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: vaults vaults_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -796,6 +834,13 @@ CREATE UNIQUE INDEX idx_conversation_archives_session_unique ON public.conversat
 --
 
 CREATE INDEX idx_messages_session_active ON public.messages USING btree (session_id) WHERE (compacted = false);
+
+
+--
+-- Name: idx_on_process_status_last_health_check_at_581ed583dd; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_on_process_status_last_health_check_at_581ed583dd ON public.vault_sync_configs USING btree (process_status, last_health_check_at);
 
 
 --
@@ -1401,6 +1446,20 @@ CREATE INDEX index_vault_links_on_workspace_id_and_link_type ON public.vault_lin
 
 
 --
+-- Name: index_vault_sync_configs_on_vault_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_vault_sync_configs_on_vault_id ON public.vault_sync_configs USING btree (vault_id);
+
+
+--
+-- Name: index_vault_sync_configs_on_workspace_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_vault_sync_configs_on_workspace_id ON public.vault_sync_configs USING btree (workspace_id);
+
+
+--
 -- Name: index_vaults_on_workspace_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1504,6 +1563,14 @@ ALTER TABLE ONLY public.memory_entry_versions
 
 
 --
+-- Name: vault_sync_configs fk_rails_330e88e338; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vault_sync_configs
+    ADD CONSTRAINT fk_rails_330e88e338 FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id);
+
+
+--
 -- Name: memory_entry_versions fk_rails_3a909d5aee; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1581,6 +1648,14 @@ ALTER TABLE ONLY public.conversation_archives
 
 ALTER TABLE ONLY public.vault_files
     ADD CONSTRAINT fk_rails_827af47546 FOREIGN KEY (vault_id) REFERENCES public.vaults(id);
+
+
+--
+-- Name: vault_sync_configs fk_rails_84aeda7758; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vault_sync_configs
+    ADD CONSTRAINT fk_rails_84aeda7758 FOREIGN KEY (vault_id) REFERENCES public.vaults(id);
 
 
 --
@@ -1810,6 +1885,12 @@ ALTER TABLE public.vault_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.vault_links ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: vault_sync_configs; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.vault_sync_configs ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: vaults; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -1897,6 +1978,13 @@ CREATE POLICY workspace_isolation ON public.vault_links TO app_user USING (((wor
 
 
 --
+-- Name: vault_sync_configs workspace_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY workspace_isolation ON public.vault_sync_configs TO app_user USING (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true))) WITH CHECK (((workspace_id)::text = current_setting('app.current_workspace_id'::text, true)));
+
+
+--
 -- Name: vaults workspace_isolation; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -1910,6 +1998,7 @@ CREATE POLICY workspace_isolation ON public.vaults TO app_user USING (((workspac
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260409010000'),
 ('20260407000200'),
 ('20260407000100'),
 ('20260406203944'),

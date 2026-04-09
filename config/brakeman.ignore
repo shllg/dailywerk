@@ -1,0 +1,18 @@
+{
+  "ignored_warnings": [
+    {
+      "warning_type": "Command Injection",
+      "warning_code": 14,
+      "fingerprint": "afbab4f0402c012b2c7afcb53f9c249c73495920d229c3091247b761faa5b077",
+      "check_name": "Execute",
+      "message": "Possible command injection",
+      "file": "app/services/obsidian_sync_manager.rb",
+      "line": 78,
+      "link": "https://brakemanscanner.org/docs/warning_types/command_injection/",
+      "confidence": "Medium",
+      "note": "False positive - Using Process.spawn with array form which avoids shell interpretation. The obsidian_vault_name is validated by VaultSyncConfig model validations (presence, format). No user input reaches the shell."
+    }
+  ],
+  "updated": "2026-04-09",
+  "brakeman_version": "8.0.4"
+}

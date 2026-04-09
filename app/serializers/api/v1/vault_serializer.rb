@@ -25,18 +25,12 @@ module Api
         # @param vault [Vault]
         # @return [Hash]
         def full(vault)
-          base = summary(vault).merge(
+          summary(vault).merge(
             recent_files: vault.vault_files.order(updated_at: :desc).limit(20).map do |file|
               VaultFileSerializer.summary(file)
-            end
+            end,
+            sync_config: vault.sync_config && VaultSyncConfigSerializer.summary(vault.sync_config)
           )
-
-          # Include sync_config only if association exists (Phase 2)
-          if vault.respond_to?(:sync_config)
-            base[:sync_config] = vault.sync_config && VaultSyncConfigSerializer.summary(vault.sync_config)
-          end
-
-          base
         end
       end
     end

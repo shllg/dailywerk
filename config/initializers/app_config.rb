@@ -43,6 +43,12 @@ Rails.application.configure do
     Rails.env.local? ? Rails.root.join("tmp/workspaces").to_s : "/data/workspaces"
   }
 
+  # Alias for Vault model (reads from config.x.vault_local_base)
+  config.x.vault_local_base = config.x.vault_s3.local_base
+
+  # -- Obsidian Sync --
+  config.x.obsidian_headless_bin = ENV.fetch("OBSIDIAN_HEADLESS_BIN", "ob")
+
   # -- GoodJob Auth --
   config.x.good_job.basic_auth_username = resolver.resolve?(:good_job, :basic_auth_username,
                                                            env: "GOOD_JOB_BASIC_AUTH_USERNAME")

@@ -5,6 +5,10 @@ require "test_helper"
 # rubocop:disable Minitest/MultipleAssertions
 class VaultStructureAnalysisJobTest < ActiveSupport::TestCase
   setup do
+    @original_vault_local_base = Rails.configuration.x.vault_local_base
+    @temp_local_base = Dir.mktmpdir("vault-structure-test")
+    Rails.configuration.x.vault_local_base = @temp_local_base
+
     @user, @workspace = create_user_with_workspace
     @vault = with_current_workspace(@workspace, user: @user) do
       Vault.create!(
@@ -17,7 +21,8 @@ class VaultStructureAnalysisJobTest < ActiveSupport::TestCase
   end
 
   teardown do
-    FileUtils.rm_rf(@vault.local_path) if @vault
+    Rails.configuration.x.vault_local_base = @original_vault_local_base
+    FileUtils.rm_rf(@temp_local_base) if @temp_local_base
   end
 
   test "writes an analysis file and generates a guide when one is missing" do

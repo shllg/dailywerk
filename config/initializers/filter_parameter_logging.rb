@@ -6,5 +6,8 @@
 Rails.application.config.filter_parameters += [
   :passw, :email, :secret, :token, :_key, :crypt, :salt, :certificate, :otp, :ssn, :cvv, :cvc,
   :sse_customer_key, :encryption_key_enc,
-  :refresh_token, :authorization_code, :code_verifier
+  :refresh_token, :authorization_code, :code_verifier,
+  # Obsidian Sync credentials (both _enc DB columns and plain param names)
+  :obsidian_email_enc, :obsidian_password_enc, :obsidian_encryption_password_enc,
+  :obsidian_email, :obsidian_password, :obsidian_encryption_password
 ]

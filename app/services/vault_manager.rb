@@ -34,11 +34,17 @@ class VaultManager
   end
 
   # Deletes the vault's local checkout, remote objects, and database row.
+  # Stops any running sync process first.
   #
   # @param vault [Vault]
   # @return [void]
   def destroy(vault)
     with_workspace_context do
+      # Stop any running sync process first
+      if vault.sync_config&.process_status.in?(%w[starting running])
+        ObsidianSyncManager.new(vault.sync_config).stop!
+      end
+
       VaultS3Service.new(vault).delete_prefix!
       FileUtils.rm_rf(local_path_for(vault.slug))
       vault.destroy!

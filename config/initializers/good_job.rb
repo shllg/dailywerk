@@ -43,6 +43,11 @@ Rails.application.configure do
       class: "VaultReconciliationJob",
       description: "Full disk-vs-DB consistency check"
     },
+    obsidian_sync_health: {
+      cron: "* * * * *",
+      class: "ObsidianSyncHealthCheckJob",
+      description: "Check health of obsidian-headless processes, restart crashed ones"
+    },
     workos_session_cleanup: {
       cron: "0 3 * * *",
       class: "WorkosSessionCleanupJob",

@@ -31,6 +31,16 @@ module ActiveSupport
     # Setup all fixtures in test/fixtures/*.yml for all tests in alphabetical order.
     fixtures :all
 
+    # Ensure vault paths use tmp directory for tests (override ENV setting)
+    setup do
+      @original_vault_local_base = Rails.configuration.x.vault_local_base
+      Rails.configuration.x.vault_local_base = Rails.root.join("tmp/workspaces").to_s
+    end
+
+    teardown do
+      Rails.configuration.x.vault_local_base = @original_vault_local_base if @original_vault_local_base
+    end
+
     def create_user_with_workspace(
       email: "sascha-#{SecureRandom.hex(4)}@dailywerk.com",
       name: "Sascha",

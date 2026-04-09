@@ -12,8 +12,7 @@ module Api
       #
       # @return [void]
       def index
-        # NOTE: includes(:sync_config) is added in Phase 2 when table exists
-        vaults = Current.workspace.vaults.order(updated_at: :desc)
+        vaults = Current.workspace.vaults.includes(:sync_config).order(updated_at: :desc)
 
         render json: {
           vaults: vaults.map { |vault| VaultSerializer.summary(vault) }
@@ -24,7 +23,7 @@ module Api
       #
       # @return [void]
       def show
-        vault = find_vault(params[:id])
+        vault = Current.workspace.vaults.includes(:sync_config).find(params[:id])
 
         render json: {
           vault: VaultSerializer.full(vault)
@@ -50,9 +49,8 @@ module Api
       def destroy
         vault = find_vault(params[:id])
 
-        # Check if there's a running sync that needs to be stopped first (Phase 2)
-        if vault.respond_to?(:sync_config) &&
-           vault.sync_config&.process_status.in?(%w[starting running])
+        # Check if there's a running sync that needs to be stopped first
+        if vault.sync_config&.process_status.in?(%w[starting running])
           ObsidianSyncStopJob.perform_later(vault.sync_config.id, workspace_id: vault.workspace_id)
           render json: {
             message: "Vault deletion queued. Sync process is being stopped.",

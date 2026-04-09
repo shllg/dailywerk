@@ -3,6 +3,15 @@
 require "test_helper"
 
 class VaultTest < ActiveSupport::TestCase
+  setup do
+    @original_vault_local_base = Rails.configuration.x.vault_local_base
+    Rails.configuration.x.vault_local_base = Rails.root.join("tmp/workspaces").to_s
+  end
+
+  teardown do
+    Rails.configuration.x.vault_local_base = @original_vault_local_base
+  end
+
   test "computes the local checkout path and enforces size limits" do
     user, workspace = create_user_with_workspace
 
