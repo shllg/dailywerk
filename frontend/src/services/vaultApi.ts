@@ -78,10 +78,14 @@ export async function removeSyncConfig(vaultId: string): Promise<void> {
   await apiRequest<void>(`/vaults/${vaultId}/sync_config`, { method: 'DELETE' })
 }
 
-export async function setupSync(vaultId: string): Promise<{ message: string; sync_config: VaultSyncConfig }> {
+export async function setupSync(vaultId: string, mfaCode?: string): Promise<{ message: string; sync_config: VaultSyncConfig }> {
   return apiRequest<{ message: string; sync_config: VaultSyncConfig }>(
     `/vaults/${vaultId}/sync_config/setup`,
-    { method: 'POST' }
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sync_config: { mfa_code: mfaCode || undefined } }),
+    }
   )
 }
 

@@ -32,6 +32,7 @@ module Api
       end
 
       # Removes the sync config and stops any running sync process.
+      # Implements two-phase delete: mark as deleting, enqueue cleanup job, return 202.
       #
       # @return [void]
       def destroy
@@ -43,17 +44,29 @@ module Api
           return
         end
 
-        # Stop the sync process if running
-        if config.process_status.in?(%w[starting running])
-          ObsidianSyncStopJob.perform_later(config.id, workspace_id: vault.workspace_id)
-        end
+        # Capture primitive values before state changes
+        process_pid = config.process_pid
+        process_host = config.process_host
+        config_base_path = config.config_base_path
 
-        config.destroy!
+        # Mark as deleting and enqueue cleanup job
+        config.update!(process_status: "deleting")
+        ObsidianSyncDestroyJob.perform_later(
+          config.id,
+          workspace_id: vault.workspace_id,
+          process_pid: process_pid,
+          process_host: process_host,
+          config_base_path: config_base_path
+        )
 
-        head :no_content
+        render json: {
+          message: "Obsidian sync config deletion queued.",
+          status: "deleting"
+        }, status: :accepted
       end
 
       # Enqueues the initial Obsidian sync setup (login, connect, first sync).
+      # Supports MFA via one-time TOTP code (NOT persisted to database).
       # Returns 202 Accepted — the job runs in background.
       #
       # @return [void]
@@ -66,7 +79,14 @@ module Api
           return
         end
 
-        ObsidianSyncSetupJob.perform_later(config.id, workspace_id: vault.workspace_id)
+        # Extract MFA code from params (NOT persisted - passed directly to job)
+        mfa_code = params.dig(:sync_config, :mfa_code)
+
+        ObsidianSyncSetupJob.perform_later(
+          config.id,
+          workspace_id: vault.workspace_id,
+          mfa_code: mfa_code
+        )
 
         render json: {
           message: "Obsidian sync setup queued.",
@@ -75,6 +95,7 @@ module Api
       end
 
       # Enqueues start of continuous sync process.
+      # @deprecated Use periodic sync via ObsidianSyncPeriodicJob instead.
       # Returns 202 Accepted — the job runs in background.
       #
       # @return [void]

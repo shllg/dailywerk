@@ -71,19 +71,24 @@ class Api::V1::VaultSyncConfigsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "New Device Name", body["sync_config"]["device_name"]
   end
 
-  test "destroy removes sync config" do
+  test "destroy marks config for deletion and enqueues destroy job" do
     create_sync_config!(@vault)
 
-    delete "/api/v1/vaults/#{@vault.id}/sync_config", headers: api_auth_headers(user: @user, workspace: @workspace)
+    assert_enqueued_with(job: ObsidianSyncDestroyJob) do
+      delete "/api/v1/vaults/#{@vault.id}/sync_config", headers: api_auth_headers(user: @user, workspace: @workspace)
+    end
 
-    assert_response :no_content
-    assert_nil @vault.reload.sync_config
+    # Returns 202 Accepted (two-phase delete)
+    assert_response :accepted
+    body = JSON.parse(response.body)
+
+    assert_equal "deleting", body["status"]
   end
 
-  test "destroy enqueues stop job when sync running" do
+  test "destroy enqueues destroy job when sync running" do
     config = create_sync_config!(@vault, process_status: "running")
 
-    assert_enqueued_with(job: ObsidianSyncStopJob, args: [ config.id, { workspace_id: @workspace.id } ]) do
+    assert_enqueued_with(job: ObsidianSyncDestroyJob) do
       delete "/api/v1/vaults/#{@vault.id}/sync_config", headers: api_auth_headers(user: @user, workspace: @workspace)
     end
   end

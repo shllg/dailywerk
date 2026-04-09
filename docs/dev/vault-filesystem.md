@@ -6,7 +6,7 @@
 
 Vaults are workspace-scoped file repositories that sync to S3 and optionally to Obsidian via `obsidian-headless`. The system consists of:
 
-- **Local filesystem** — Human-readable files in `tmp/workspaces/`
+- **Local filesystem** — Human-readable files in a writable local vault root
 - **S3/RustFS** — Encrypted remote storage with SSE-C per-vault keys
 - **PostgreSQL** — Metadata, chunks, and embeddings for search
 - **VaultWatcher** — Inotify-based file change detection
@@ -16,8 +16,17 @@ Vaults are workspace-scoped file repositories that sync to S3 and optionally to 
 
 ### Development
 
+By default, local development stores vault checkouts under `../vault-workspaces/`
+relative to the repo root so sibling worktrees can share the same local vault
+data when they also share the same database.
+
+When a worktree is created with `bin/worktree setup --db-mode new`, that
+worktree gets its own `VAULT_LOCAL_BASE` pointing at `tmp/workspaces/` inside
+the worktree so its isolated database cannot see another worktree's local vault
+checkout.
+
 ```
-tmp/workspaces/
+../vault-workspaces/
 └── {workspace_uuid}/
     └── vaults/
         └── {vault_slug}/
@@ -32,19 +41,21 @@ tmp/workspaces/
 
 ### Production
 
-Same layout, but root is controlled by `VAULT_LOCAL_BASE` env var (defaults to `/data/workspaces`).
+Same layout, but the root is controlled by `VAULT_LOCAL_BASE`. If that variable
+is unset, production/staging default to `/data/workspaces` inside the app
+container, with environment-specific host mounts supplying the real storage.
 
 ## Quick Inspection Commands
 
 ```bash
 # List all workspace directories
-ls -la tmp/workspaces/
+ls -la ../vault-workspaces/
 
 # Find a specific vault
-cd tmp/workspaces/$(uuid)/vaults/my-vault
+cd ../vault-workspaces/$(uuid)/vaults/my-vault
 
 # Read a file directly
-cat tmp/workspaces/.../vaults/my-vault/notes/ideas.md
+cat ../vault-workspaces/.../vaults/my-vault/notes/ideas.md
 
 # Watch the watcher logs
 tail -f log/development.log | grep VaultWatcher
@@ -198,7 +209,7 @@ bin/rails runner "
 # Manual CLI test (with credentials in env)
 export OBSIDIAN_EMAIL=...
 export OBSIDIAN_PASSWORD=...
-cd tmp/workspaces/.../vaults/my-vault
+cd ../vault-workspaces/.../vaults/my-vault
 ob login
 ob vaults
 ob sync --vault "My Vault"
@@ -232,7 +243,17 @@ It:
 
 ### "Permission denied" on vault create
 
-Check `VAULT_LOCAL_BASE` env var. In tests, it should be `tmp/workspaces`. In production, ensure the directory is writable.
+Check `VAULT_LOCAL_BASE` first.
+
+- Local dev defaults to `../vault-workspaces/`.
+- `bin/worktree setup --db-mode new` writes a worktree-local override at `tmp/workspaces/`.
+- Production/staging default to `/data/workspaces` inside the container unless `VAULT_LOCAL_BASE` is explicitly set.
+
+If your interactive shell auto-sources `.env` files, it can keep exporting a
+stale `VAULT_LOCAL_BASE` even after `.env` changes. The repo entrypoints
+(`bin/dev`, `bin/test`, `bin/test-llm`, `bin/test-agent-integration`) now
+re-export the current repo env files on each run, so restart those processes
+through the repo scripts after changing vault path config.
 
 ### Files not appearing in search
 
@@ -310,7 +331,7 @@ bin/rails runner "VaultS3SyncJob.perform_now(Vault.first.id, workspace_id: Vault
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VAULT_LOCAL_BASE` | `tmp/workspaces` (dev) | Local vault root path |
+| `VAULT_LOCAL_BASE` | `../vault-workspaces` (dev) | Local vault root path |
 | `OBSIDIAN_HEADLESS_BIN` | `ob` | Path to obsidian-headless CLI |
 | `AWS_ENDPOINT` | `http://localhost:9002` | S3/RustFS endpoint |
 | `S3_BUCKET` | `dailywerk-dev` | S3 bucket name |

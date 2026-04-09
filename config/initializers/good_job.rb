@@ -48,6 +48,11 @@ Rails.application.configure do
       class: "ObsidianSyncHealthCheckJob",
       description: "Check health of obsidian-headless processes, restart crashed ones"
     },
+    obsidian_sync_periodic: {
+      cron: "*/5 * * * *",
+      class: "ObsidianSyncPeriodicAllJob",
+      description: "Trigger periodic sync for all configured Obsidian vaults (5 min interval)"
+    },
     workos_session_cleanup: {
       cron: "0 3 * * *",
       class: "WorkosSessionCleanupJob",

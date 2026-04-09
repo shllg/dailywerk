@@ -3,8 +3,16 @@
 # Restarts the Obsidian Sync process with failure tracking.
 class ObsidianSyncRestartJob < ApplicationJob
   include WorkspaceScopedJob
+  include GoodJob::ActiveJobExtensions::Concurrency
 
   queue_as :default
+
+  # Prevent concurrent restart operations for the same config
+  good_job_control_concurrency_with(
+    perform_limit: 1,
+    total_limit: 2,
+    key: -> { "obsidian_sync_lifecycle_#{arguments.first}" }
+  )
 
   discard_on ActiveRecord::RecordNotFound
 

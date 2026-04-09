@@ -95,11 +95,17 @@ METRICS_ENABLED=true
 # Developer tooling
 SKIP_DOCKER=0
 RUN_LIVE_LLM_TESTS=0
+RUN_AGENT_INTEGRATION_TESTS=0
 # PARALLEL_WORKERS=       — defaults handled in test_helper
 # PARALLELIZE_THRESHOLD=  — defaults handled in test_helper
 
 # Obsidian Sync (optional - defaults to 'ob' if not set)
 # OBSIDIAN_HEADLESS_BIN=ob  — npm install -g obsidian-headless
+
+# System paths (passed to obsidian-headless CLI subprocesses)
+# These are standard environment variables; Obsidian Sync needs them for CLI execution
+PATH=/usr/local/bin:/usr/bin:/bin
+HOME=/home/user
 
 # Jobs
 # GOOD_JOB_QUEUE_PREFIX=  — empty is fine, leave unset

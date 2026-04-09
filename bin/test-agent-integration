@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+if [ -x ./bin/load-env ]; then
+  eval "$(./bin/load-env)"
+fi
+
+if [ -z "${OPENAI_API_KEY:-}" ]; then
+  echo "OPENAI_API_KEY is required for bin/test-agent-integration" >&2
+  exit 1
+fi
+
+export RUN_AGENT_INTEGRATION_TESTS="${RUN_AGENT_INTEGRATION_TESTS:-1}"
+export PARALLEL_WORKERS="${PARALLEL_WORKERS:-1}"
+export PARALLELIZE_THRESHOLD="${PARALLELIZE_THRESHOLD:-1}"
+
+if [ "$#" -gt 0 ]; then
+  test_targets=("$@")
+else
+  test_targets=(test/agent_integration)
+fi
+
+bin/rails db:test:prepare
+bin/rails test "${test_targets[@]}"

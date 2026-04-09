@@ -1,0 +1,69 @@
+name: Agent Integration
+
+on:
+  pull_request:
+  push:
+    branches: [ master, dev ]
+  workflow_dispatch:
+
+jobs:
+  ruby-agent-integration:
+    name: ruby - agent integration
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: --health-cmd="pg_isready" --health-interval=10s --health-timeout=5s --health-retries=3
+
+      valkey:
+        image: valkey/valkey:8
+        ports:
+          - 6379:6379
+        options: --health-cmd "valkey-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+
+    steps:
+      - name: Install packages
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libpq-dev libvips
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+
+      - name: Bootstrap RLS database role
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d postgres <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
+              CREATE ROLE app_user LOGIN PASSWORD 'dailywerk_app_password';
+            ELSE
+              ALTER ROLE app_user WITH LOGIN PASSWORD 'dailywerk_app_password';
+            END IF;
+          END
+          $$;
+          SQL
+
+      - name: Verify OpenAI key is configured
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: test -n "$OPENAI_API_KEY"
+
+      - name: Run agent integration tests
+        env:
+          RAILS_ENV: test
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: bin/test-agent-integration

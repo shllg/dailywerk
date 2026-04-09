@@ -41,9 +41,12 @@ class ObsidianSyncHealthCheckJobTest < ActiveSupport::TestCase
       fake_manager
     end
 
-    assert_enqueued_with(job: ObsidianSyncRestartJob, args: [ config.id, { workspace_id: @workspace.id } ]) do
-      silence_expected_logs do
-        ObsidianSyncHealthCheckJob.perform_now
+    # No auth error log
+    stub_stderr_log("") do
+      assert_enqueued_with(job: ObsidianSyncRestartJob, args: [ config.id, { workspace_id: @workspace.id } ]) do
+        silence_expected_logs do
+          ObsidianSyncHealthCheckJob.perform_now
+        end
       end
     end
 
@@ -53,7 +56,7 @@ class ObsidianSyncHealthCheckJobTest < ActiveSupport::TestCase
     assert_predicate config.last_health_check_at, :present?
     assert_equal "running", config.process_status
   ensure
-    ObsidianSyncManager.define_singleton_method(:new, original_new)
+    ObsidianSyncManager.define_singleton_method(:new, original_new) if original_new
   end
 
   test "marks a sync as permanently failed after the final retry" do
@@ -79,8 +82,11 @@ class ObsidianSyncHealthCheckJobTest < ActiveSupport::TestCase
       fake_manager
     end
 
-    silence_expected_logs do
-      ObsidianSyncHealthCheckJob.perform_now
+    # No auth error log
+    stub_stderr_log("") do
+      silence_expected_logs do
+        ObsidianSyncHealthCheckJob.perform_now
+      end
     end
 
     config.reload
@@ -91,7 +97,111 @@ class ObsidianSyncHealthCheckJobTest < ActiveSupport::TestCase
     assert_match(/failed permanently/, config.error_message)
     assert_no_enqueued_jobs only: ObsidianSyncRestartJob
   ensure
-    ObsidianSyncManager.define_singleton_method(:new, original_new)
+    ObsidianSyncManager.define_singleton_method(:new, original_new) if original_new
+  end
+
+  test "transitions to auth_required when auth error detected in stderr" do
+    config = create_sync_config!(
+      @vault,
+      process_status: "running",
+      consecutive_failures: 2
+    )
+    fake_manager = Object.new
+    original_new = ObsidianSyncManager.method(:new)
+
+    fake_manager.define_singleton_method(:healthy?) do
+      false
+    end
+    fake_manager.define_singleton_method(:stop!) do
+      true
+    end
+
+    ObsidianSyncManager.define_singleton_method(:new) do |passed_config|
+      raise "unexpected config" unless passed_config.id == config.id
+
+      fake_manager
+    end
+
+    # Simulate auth error in stderr log
+    stub_stderr_log("Error: Authentication failed: Invalid token") do
+      silence_expected_logs do
+        ObsidianSyncHealthCheckJob.perform_now
+      end
+    end
+
+    config.reload
+
+    assert_equal "auth_required", config.process_status
+    assert_equal 0, config.consecutive_failures
+    assert_includes config.error_message, "Authentication failed"
+  ensure
+    ObsidianSyncManager.define_singleton_method(:new, original_new) if original_new
+  end
+
+  test "handles stopping status correctly" do
+    config = create_sync_config!(
+      @vault,
+      process_status: "stopping",
+      process_pid: 12345,
+      consecutive_failures: 0
+    )
+    fake_manager = Object.new
+    original_new = ObsidianSyncManager.method(:new)
+
+    fake_manager.define_singleton_method(:healthy?) do
+      false # Process not alive
+    end
+
+    ObsidianSyncManager.define_singleton_method(:new) do |passed_config|
+      raise "unexpected config" unless passed_config.id == config.id
+
+      fake_manager
+    end
+
+    # No auth error log
+    stub_stderr_log("") do
+      silence_expected_logs do
+        ObsidianSyncHealthCheckJob.perform_now
+      end
+    end
+
+    config.reload
+
+    # Should have incremented failures
+    assert_equal 1, config.consecutive_failures
+  ensure
+    ObsidianSyncManager.define_singleton_method(:new, original_new) if original_new
+  end
+
+  test "reset failure count when healthy" do
+    config = create_sync_config!(
+      @vault,
+      process_status: "running",
+      consecutive_failures: 3,
+      error_message: "Previous error"
+    )
+    fake_manager = Object.new
+    original_new = ObsidianSyncManager.method(:new)
+
+    fake_manager.define_singleton_method(:healthy?) do
+      true
+    end
+
+    ObsidianSyncManager.define_singleton_method(:new) do |passed_config|
+      raise "unexpected config" unless passed_config.id == config.id
+
+      fake_manager
+    end
+
+    ObsidianSyncHealthCheckJob.perform_now
+
+    config.reload
+
+    assert_equal 0, config.consecutive_failures
+    assert_nil config.error_message
+    assert_equal "running", config.process_status
+  ensure
+    ObsidianSyncManager.define_singleton_method(:new, original_new) if original_new
   end
 
   private
@@ -107,7 +217,7 @@ class ObsidianSyncHealthCheckJobTest < ActiveSupport::TestCase
     end
   end
 
-  def create_sync_config!(vault, process_status:, consecutive_failures:)
+  def create_sync_config!(vault, process_status:, consecutive_failures: 0, process_pid: nil, error_message: nil)
     with_current_workspace(@workspace, user: @user) do
       VaultSyncConfig.create!(
         vault: vault,
@@ -117,8 +227,26 @@ class ObsidianSyncHealthCheckJobTest < ActiveSupport::TestCase
         obsidian_vault_name: "Health Check",
         device_name: "Health Device",
         process_status: process_status,
-        consecutive_failures: consecutive_failures
+        consecutive_failures: consecutive_failures,
+        process_pid: process_pid,
+        error_message: error_message,
+        obsidian_email_enc: "test@example.com",
+        obsidian_password_enc: "password123"
       )
+    end
+  end
+
+  def stub_stderr_log(content)
+    # Use a simpler approach - just write to the actual log location
+    log_dir = Rails.root.join("log", "obsidian")
+    FileUtils.mkdir_p(log_dir)
+    actual_log = log_dir.join("#{@vault.id}_stderr.log")
+
+    begin
+      File.write(actual_log, content)
+      yield
+    ensure
+      File.delete(actual_log) if File.exist?(actual_log)
     end
   end
 end

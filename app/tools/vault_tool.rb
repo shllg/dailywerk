@@ -2,14 +2,14 @@
 
 # Exposes read/write/search operations for the current workspace vault.
 class VaultTool < RubyLLM::Tool
-  ACTIONS = %w[guide update_guide read write list search backlinks].freeze
+  ACTIONS = %w[guide update_guide read write list search backlinks list_vaults].freeze
   PARAMETERS_SCHEMA = {
     type: "object",
     properties: {
       action: {
         type: "string",
         enum: ACTIONS,
-        description: "One of: guide, update_guide, read, write, list, search, backlinks"
+        description: "One of: guide, update_guide, read, write, list, search, backlinks, list_vaults"
       },
       path: {
         anyOf: [
@@ -58,14 +58,14 @@ class VaultTool < RubyLLM::Tool
           { type: "string" },
           { type: "null" }
         ],
-        description: "Optional vault slug when multiple active vaults exist"
+        description: "Vault slug to target. Required when multiple vaults exist. Pass null to use the default vault (only works with a single active vault). Use list_vaults to see available slugs."
       }
     },
     required: %w[action path content glob query limit section vault_slug],
     additionalProperties: false
   }.freeze
 
-  description "Reads, writes, lists, and searches the current workspace vault"
+  description "Reads, writes, lists, and searches workspace vaults. Use list_vaults to discover available vaults. Pass vault_slug to target a specific vault; pass null when only one vault exists."
   params PARAMETERS_SCHEMA
   with_params(function: { strict: true })
 
@@ -87,7 +87,14 @@ class VaultTool < RubyLLM::Tool
   # @param vault_slug [String, nil]
   # @return [Hash, Array<Hash>]
   def execute(action:, path: nil, content: nil, glob: nil, query: nil, limit: nil, section: nil, vault_slug: nil)
+    return list_vaults if action == "list_vaults"
+
     vault = resolve_vault(vault_slug)
+    if vault_slug.blank? && @workspace&.vaults&.active&.count.to_i > 1
+      return {
+        error: "Multiple vaults exist. Pass vault_slug to specify which one. Use list_vaults to see available slugs."
+      }
+    end
     return { error: "No vault found" } unless vault
     return { error: "Vault is suspended — size limit exceeded" } if vault.status == "suspended" && action == "write"
 
@@ -127,7 +134,24 @@ class VaultTool < RubyLLM::Tool
     scope = @workspace.vaults.active
     return scope.find_by(slug: vault_slug) if vault_slug.present?
 
+    return if scope.count != 1
+
     scope.first
+  end
+
+  # @return [Array<Hash>]
+  def list_vaults
+    return [] unless @workspace
+
+    @workspace.vaults.active.order(:name).map do |vault|
+      {
+        slug: vault.slug,
+        name: vault.name,
+        vault_type: vault.vault_type,
+        status: vault.status,
+        file_count: vault.file_count
+      }
+    end
   end
 
   # @param vault [Vault]

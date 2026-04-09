@@ -143,6 +143,7 @@ export function VaultPage() {
     device_name: '',
     sync_mode: 'bidirectional',
   })
+  const [mfaCode, setMfaCode] = useState('')
   const [isSavingSync, setIsSavingSync] = useState(false)
   const [isSyncActionPending, setIsSyncActionPending] = useState(false)
 
@@ -352,7 +353,8 @@ export function VaultPage() {
       let result: { sync_config: VaultSyncConfig }
       switch (action) {
         case 'setup':
-          result = await setupSync(selectedVaultId)
+          result = await setupSync(selectedVaultId, mfaCode || undefined)
+          setMfaCode('')
           break
         case 'start':
           result = await startSync(selectedVaultId)
@@ -719,14 +721,31 @@ export function VaultPage() {
                   )}
                 </div>
 
-                <div className="mt-4 flex gap-2">
-                  <button
-                    onClick={() => handleSyncAction('setup')}
-                    disabled={isSyncActionPending}
-                    className="rounded-lg bg-cyan-500/20 px-3 py-1.5 text-sm font-medium text-cyan-300 hover:bg-cyan-500/30 disabled:opacity-50"
-                  >
-                    Setup
-                  </button>
+                <div className="mt-4 flex items-end gap-2">
+                  <div className="flex items-end gap-2">
+                    <div>
+                      <label className="mb-1 block text-xs text-slate-500">
+                        2FA Code (if enabled)
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        value={mfaCode}
+                        onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                        placeholder="123456"
+                        className="w-24 rounded-lg border border-white/10 bg-white/[0.05] px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 focus:border-cyan-500/50 focus:outline-none"
+                      />
+                    </div>
+                    <button
+                      onClick={() => handleSyncAction('setup')}
+                      disabled={isSyncActionPending}
+                      className="rounded-lg bg-cyan-500/20 px-3 py-1.5 text-sm font-medium text-cyan-300 hover:bg-cyan-500/30 disabled:opacity-50"
+                    >
+                      Setup
+                    </button>
+                  </div>
                   <button
                     onClick={() => handleSyncAction('start')}
                     disabled={isSyncActionPending}

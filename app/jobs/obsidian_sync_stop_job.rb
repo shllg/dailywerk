@@ -1,10 +1,19 @@
 # frozen_string_literal: true
 
 # Stops the Obsidian Sync process.
+# Uses "stopping" status to preserve PID during shutdown.
 class ObsidianSyncStopJob < ApplicationJob
   include WorkspaceScopedJob
+  include GoodJob::ActiveJobExtensions::Concurrency
 
   queue_as :default
+
+  # Prevent concurrent start/stop operations for the same config
+  good_job_control_concurrency_with(
+    perform_limit: 1,
+    total_limit: 2,
+    key: -> { "obsidian_sync_lifecycle_#{arguments.first}" }
+  )
 
   discard_on ActiveRecord::RecordNotFound
 

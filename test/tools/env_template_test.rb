@@ -27,6 +27,7 @@ class EnvTemplateTest < ActiveSupport::TestCase
     PORT
     SKIP_DOCKER
     RUN_LIVE_LLM_TESTS
+    RUN_AGENT_INTEGRATION_TESTS
     PARALLEL_WORKERS
     PARALLELIZE_THRESHOLD
   ].freeze

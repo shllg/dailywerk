@@ -14,6 +14,7 @@ class ContextBuilder
   BRIDGE_MESSAGE_LIMIT = 10
   USER_PROFILE_TITLE = "## About This User"
   KNOWLEDGE_CONTRACT_TITLE = "## Knowledge Contract"
+  AVAILABLE_VAULTS_TITLE = "## Available Vaults"
   LONG_TERM_MEMORY_TITLE = "## Structured Memory"
   PREVIOUS_CONTEXT_TITLE = "## Previous Context"
   RELEVANT_ARCHIVES_TITLE = "## Relevant Archived Context"
@@ -33,6 +34,7 @@ class ContextBuilder
     prompt_parts = [ PromptBuilder.new(@agent).build ]
     prompt_parts << user_profile_section
     prompt_parts << knowledge_contract_section
+    prompt_parts << available_vaults_section
 
     if @session.summary.present?
       prompt_parts << "#{PREVIOUS_CONTEXT_TITLE}\n\n#{@session.summary}"
@@ -64,17 +66,44 @@ class ContextBuilder
 
   # @return [String]
   def knowledge_contract_section
+    vault_line = if active_vaults.any?
+      "- Vault: user-authored documents and files that hold longer-form notes, artifacts, and reference material."
+    else
+      "- Vault: no vault is configured yet."
+    end
+
     <<~TEXT.strip
       #{KNOWLEDGE_CONTRACT_TITLE}
 
-      This workspace has two valid persistent knowledge systems:
+      This workspace uses the following persistent knowledge systems:
       - Structured memory: curated long-term facts, preferences, rules, and ongoing context stored in the database.
-      - Vault: user-authored documents and files that hold longer-form notes, artifacts, and reference material.
+      #{vault_line}
 
       Treat both as valid context. Use structured memory for durable recall and the vault for richer source material.
       If the user corrects old information, prefer the newer user statement and update memory accordingly.
       Use shared memory for user-wide facts and preferences. Use private memory for agent-specific specialist context.
     TEXT
+  end
+
+  # @return [String, nil]
+  def available_vaults_section
+    return nil if active_vaults.empty?
+
+    preamble = if active_vaults.one?
+      "This workspace has one vault. Pass `vault_slug: null` to use it by default."
+    else
+      "This workspace has #{active_vaults.size} vaults. You must pass `vault_slug` to target the correct vault."
+    end
+
+    lines = active_vaults.map do |vault|
+      "- **#{vault.name}** (slug: `#{vault.slug}`, type: #{vault.vault_type}, files: #{vault.file_count})"
+    end
+
+    [
+      AVAILABLE_VAULTS_TITLE,
+      preamble,
+      lines.join("\n")
+    ].join("\n\n")
   end
 
   # @return [String, nil]
@@ -176,5 +205,10 @@ class ContextBuilder
   # @return [Hash]
   def normalized_agent_params
     @normalized_agent_params ||= @agent.params.is_a?(Hash) ? @agent.params.deep_stringify_keys : {}
+  end
+
+  # @return [Array<Vault>]
+  def active_vaults
+    @active_vaults ||= @session.workspace&.vaults&.active&.order(:name)&.to_a || []
   end
 end

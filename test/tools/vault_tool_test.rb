@@ -35,6 +35,82 @@ class VaultToolTest < ActiveSupport::TestCase
     assert_equal "written", result[:status]
   end
 
+  test "list_vaults returns all active vaults with metadata" do
+    user, workspace, _session, vault, tool = build_tool
+    other_vault = with_current_workspace(workspace, user:) do
+      vault.update!(file_count: 3)
+      Vault.create!(
+        name: "Obsidian Notes",
+        slug: "obsidian-notes-#{SecureRandom.hex(4)}",
+        vault_type: "obsidian",
+        status: "active",
+        file_count: 12
+      )
+    end
+
+    result = with_current_workspace(workspace, user:) do
+      tool.execute(action: "list_vaults")
+    end
+
+    assert_equal [ vault.name, other_vault.name ].sort, result.map { |entry| entry[:name] }.sort
+    assert_includes result, {
+      slug: vault.slug,
+      name: vault.name,
+      vault_type: vault.vault_type,
+      status: vault.status,
+      file_count: 3
+    }
+    assert_includes result, {
+      slug: other_vault.slug,
+      name: other_vault.name,
+      vault_type: other_vault.vault_type,
+      status: other_vault.status,
+      file_count: 12
+    }
+  end
+
+  test "list_vaults excludes non-active vaults" do
+    user, workspace, _session, vault, tool = build_tool
+    with_current_workspace(workspace, user:) do
+      Vault.create!(
+        name: "Suspended Vault",
+        slug: "suspended-vault-#{SecureRandom.hex(4)}",
+        vault_type: "native",
+        status: "suspended"
+      )
+    end
+
+    result = with_current_workspace(workspace, user:) do
+      tool.execute(action: "list_vaults")
+    end
+
+    assert_equal [ vault.slug ], result.map { |entry| entry[:slug] }
+  end
+
+  test "list_vaults returns an empty array when no vaults exist" do
+    user, workspace = create_user_with_workspace(
+      email: "vault-tool-empty-#{SecureRandom.hex(4)}@dailywerk.com",
+      workspace_name: "Empty Vault Tool"
+    )
+
+    session = with_current_workspace(workspace, user:) do
+      agent = Agent.create!(
+        slug: "vault-tool-empty-#{SecureRandom.hex(4)}",
+        name: "Vault Tool Empty",
+        model_id: "gpt-5.4"
+      )
+      Session.resolve(agent:)
+    end
+
+    tool = VaultTool.new(user:, session:)
+
+    result = with_current_workspace(workspace, user:) do
+      tool.execute(action: "list_vaults")
+    end
+
+    assert_equal [], result
+  end
+
   test "list respects the glob and hides ignored paths" do
     user, workspace, _session, vault, tool = build_tool
     file_service = VaultFileService.new(vault: vault)
@@ -176,6 +252,66 @@ class VaultToolTest < ActiveSupport::TestCase
     assert_equal [ "Line 1 Line 2" ], result.map { |entry| entry[:snippet] }
   ensure
     VaultSearchService.define_singleton_method(:new, original_new)
+  end
+
+  test "write rejects ambiguous multi-vault requests when vault_slug is nil" do
+    user, workspace, _session, vault, tool = build_tool
+    with_current_workspace(workspace, user:) do
+      Vault.create!(
+        name: "Second Vault",
+        slug: "second-vault-#{SecureRandom.hex(4)}",
+        vault_type: "native",
+        status: "active"
+      )
+    end
+
+    result = with_current_workspace(workspace, user:) do
+      tool.execute(action: "write", path: "notes/plan.md", content: "# Plan", vault_slug: nil)
+    end
+
+    assert_equal(
+      {
+        error: "Multiple vaults exist. Pass vault_slug to specify which one. Use list_vaults to see available slugs."
+      },
+      result
+    )
+    refute_includes VaultFileService.new(vault: vault).list(glob: "**/*"), "notes/plan.md"
+  end
+
+  test "write targets the requested vault when vault_slug is provided" do
+    user, workspace, _session, first_vault, tool = build_tool
+    second_vault = with_current_workspace(workspace, user:) do
+      Vault.create!(
+        name: "Second Vault",
+        slug: "second-vault-#{SecureRandom.hex(4)}",
+        vault_type: "native",
+        status: "active"
+      )
+    end
+
+    result = with_current_workspace(workspace, user:) do
+      tool.execute(
+        action: "write",
+        path: "notes/target.md",
+        content: "target vault",
+        vault_slug: second_vault.slug
+      )
+    end
+
+    assert_equal "written", result[:status]
+    assert_equal "target vault", VaultFileService.new(vault: second_vault).read("notes/target.md")
+    refute_includes VaultFileService.new(vault: first_vault).list(glob: "**/*"), "notes/target.md"
+  end
+
+  test "write uses the only active vault when vault_slug is nil" do
+    user, workspace, _session, vault, tool = build_tool
+
+    result = with_current_workspace(workspace, user:) do
+      tool.execute(action: "write", path: "notes/default.md", content: "default vault", vault_slug: nil)
+    end
+
+    assert_equal "written", result[:status]
+    assert_equal "default vault", VaultFileService.new(vault: vault).read("notes/default.md")
   end
 
   private

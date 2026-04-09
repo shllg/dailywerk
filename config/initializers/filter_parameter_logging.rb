@@ -9,5 +9,7 @@ Rails.application.config.filter_parameters += [
   :refresh_token, :authorization_code, :code_verifier,
   # Obsidian Sync credentials (both _enc DB columns and plain param names)
   :obsidian_email_enc, :obsidian_password_enc, :obsidian_encryption_password_enc,
-  :obsidian_email, :obsidian_password, :obsidian_encryption_password
+  :obsidian_email, :obsidian_password, :obsidian_encryption_password,
+  # MFA TOTP code (single-use, but still sensitive)
+  :mfa_code
 ]

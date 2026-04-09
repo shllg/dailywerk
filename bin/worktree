@@ -383,6 +383,10 @@ worktree_setup() {
     cp "${ROOT_DIR}/.env" "${worktree_dir}/.env"
     say green "  Copied .env from main repo"
   fi
+  if [ -f "${ROOT_DIR}/.env.local" ] && [ ! -f "${worktree_dir}/.env.local" ]; then
+    cp "${ROOT_DIR}/.env.local" "${worktree_dir}/.env.local"
+    say green "  Copied .env.local from main repo"
+  fi
 
   # Copy credentials if present
   if [ -f "${ROOT_DIR}/config/master.key" ] && [ ! -f "$worktree_dir/config/master.key" ]; then

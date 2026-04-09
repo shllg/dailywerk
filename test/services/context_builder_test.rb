@@ -131,6 +131,77 @@ class ContextBuilderTest < ActiveSupport::TestCase
     end
   end
 
+  test "build includes available vaults section for a single vault" do
+    user, workspace = create_user_with_workspace
+
+    with_current_workspace(workspace, user:) do
+      agent = Agent.create!(slug: "main", name: "DailyWerk", model_id: "gpt-5.4")
+      session = Session.resolve(agent:)
+      vault = Vault.create!(
+        name: "Knowledge Base",
+        slug: "knowledge-base-#{SecureRandom.hex(4)}",
+        vault_type: "native",
+        status: "active",
+        file_count: 7
+      )
+
+      payload = with_empty_memory_context do
+        ContextBuilder.new(session:).build
+      end
+
+      assert_includes payload[:system_prompt], "## Available Vaults"
+      assert_includes payload[:system_prompt], "This workspace has one vault. Pass `vault_slug: null` to use it by default."
+      assert_includes payload[:system_prompt], "**#{vault.name}** (slug: `#{vault.slug}`, type: native, files: 7)"
+    end
+  end
+
+  test "build includes available vaults section for multiple vaults" do
+    user, workspace = create_user_with_workspace
+
+    with_current_workspace(workspace, user:) do
+      agent = Agent.create!(slug: "main", name: "DailyWerk", model_id: "gpt-5.4")
+      session = Session.resolve(agent:)
+      Vault.create!(
+        name: "Knowledge Base",
+        slug: "knowledge-base-#{SecureRandom.hex(4)}",
+        vault_type: "native",
+        status: "active",
+        file_count: 2
+      )
+      Vault.create!(
+        name: "Obsidian Notes",
+        slug: "obsidian-notes-#{SecureRandom.hex(4)}",
+        vault_type: "obsidian",
+        status: "active",
+        file_count: 9
+      )
+
+      payload = with_empty_memory_context do
+        ContextBuilder.new(session:).build
+      end
+
+      assert_includes payload[:system_prompt], "This workspace has 2 vaults. You must pass `vault_slug` to target the correct vault."
+      assert_includes payload[:system_prompt], "slug: `knowledge-base-"
+      assert_includes payload[:system_prompt], "slug: `obsidian-notes-"
+    end
+  end
+
+  test "build omits available vaults section when no vaults exist" do
+    user, workspace = create_user_with_workspace
+
+    with_current_workspace(workspace, user:) do
+      agent = Agent.create!(slug: "main", name: "DailyWerk", model_id: "gpt-5.4")
+      session = Session.resolve(agent:)
+
+      payload = with_empty_memory_context do
+        ContextBuilder.new(session:).build
+      end
+
+      assert_not_includes payload[:system_prompt], "## Available Vaults"
+      assert_includes payload[:system_prompt], "- Vault: no vault is configured yet."
+    end
+  end
+
   test "build includes deterministic recap for a fresh session" do
     user, workspace = create_user_with_workspace
     original_batch_call = MessageSummarizer.method(:batch_call)
