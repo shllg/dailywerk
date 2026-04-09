@@ -332,6 +332,7 @@ class ObsidianSyncManagerTest < ActiveSupport::TestCase
       config = create_sync_config!(vault, workspace)
 
       manager = ObsidianSyncManager.new(config)
+      manager.define_singleton_method(:ensure_cli_available!) { nil }
 
       calls = []
       original_capture3 = Open3.method(:capture3)
@@ -379,6 +380,7 @@ class ObsidianSyncManagerTest < ActiveSupport::TestCase
       config = create_sync_config!(vault, workspace)
 
       manager = ObsidianSyncManager.new(config)
+      manager.define_singleton_method(:ensure_cli_available!) { nil }
 
       original_capture3 = Open3.method(:capture3)
       Open3.define_singleton_method(:capture3) do |env, *_args|
