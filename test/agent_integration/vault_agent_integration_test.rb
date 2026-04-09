@@ -44,8 +44,10 @@ class VaultAgentIntegrationTest < AgentIntegrationTestCase
         content: "Use the vault tool to read #{source_path} and reply with only the codename."
       )
 
-      assert_includes read_message.content, source_marker
-      assert_includes read_message.tool_calls.pluck(:name), "vault"
+      read_tool_call = read_message.tool_calls.find_by(name: "vault")
+
+      assert_not_nil read_tool_call
+      assert_includes read_tool_call.result.content, source_marker
 
       clear_enqueued_jobs
 
@@ -63,8 +65,11 @@ class VaultAgentIntegrationTest < AgentIntegrationTestCase
         PROMPT
       )
 
-      assert_includes write_message.content, "CREATED"
-      assert_includes write_message.tool_calls.pluck(:name), "vault"
+      write_tool_call = write_message.tool_calls.find_by(name: "vault")
+
+      assert_not_nil write_tool_call
+      assert_includes write_tool_call.result.content, generated_path
+      assert_includes write_tool_call.result.content, "written"
 
       perform_enqueued_jobs only: VaultFileChangedJob
 
