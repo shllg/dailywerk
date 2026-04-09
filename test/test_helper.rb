@@ -14,9 +14,12 @@ require_relative "../config/environment"
 require "rails/test_help"
 require "openssl"
 require "jwt"
+require_relative "support/chat_turn_helpers"
 
 module ActiveSupport
   class TestCase
+    include ChatTurnHelpers
+
     # Coverage runs use a single worker so SimpleCov emits one stable result.
     parallel_workers = ENV["COVERAGE"] == "1" ? "1" : ENV["PARALLEL_WORKERS"].presence
     parallel_threshold = ENV["PARALLELIZE_THRESHOLD"].presence

@@ -41,35 +41,34 @@ class VaultAgentIntegrationTest < AgentIntegrationTestCase
         session:,
         workspace:,
         user:,
-        content: "Use the vault tool to read #{source_path} and reply with only the codename."
+        content: "Use the vault tool to read #{source_path} and reply with only the codename.",
+        tool_name: "vault"
       )
 
-      read_tool_call = read_message.tool_calls.find_by(name: "vault")
-
-      assert_not_nil read_tool_call
-      assert_includes read_tool_call.result.content, source_marker
+      assert_includes read_message[:assistant_tool_call_names], "vault"
+      assert_includes read_message[:tool_result_content], source_marker
 
       clear_enqueued_jobs
 
       generated_path = "notes/generated-#{SecureRandom.hex(4)}.md"
       generated_marker = "agent-created-#{SecureRandom.hex(4)}"
+      write_prompt = <<~PROMPT.strip
+        Use the vault tool to create #{generated_path} with exactly this content:
+        Status: #{generated_marker}
+
+        Reply with only CREATED after the write succeeds.
+      PROMPT
       write_message = perform_live_chat_turn(
         session:,
         workspace:,
         user:,
-        content: <<~PROMPT.strip
-          Use the vault tool to create #{generated_path} with exactly this content:
-          Status: #{generated_marker}
-
-          Reply with only CREATED after the write succeeds.
-        PROMPT
+        content: write_prompt,
+        tool_name: "vault"
       )
 
-      write_tool_call = write_message.tool_calls.find_by(name: "vault")
-
-      assert_not_nil write_tool_call
-      assert_includes write_tool_call.result.content, generated_path
-      assert_includes write_tool_call.result.content, "written"
+      assert_includes write_message[:assistant_tool_call_names], "vault"
+      assert_includes write_message[:tool_result_content], generated_path
+      assert_includes write_message[:tool_result_content], "written"
 
       perform_enqueued_jobs only: VaultFileChangedJob
 
@@ -126,8 +125,13 @@ class VaultAgentIntegrationTest < AgentIntegrationTestCase
   # @param workspace [Workspace]
   # @param user [User]
   # @param content [String]
-  # @return [Message]
-  def perform_live_chat_turn(session:, workspace:, user:, content:)
+  # @param tool_name [String]
+  # @return [Hash]
+  def perform_live_chat_turn(session:, workspace:, user:, content:, tool_name:)
+    existing_message_ids = with_current_workspace(workspace, user:) do
+      session.messages.pluck(:id)
+    end
+
     with_disabled_memory_extraction do
       ChatStreamJob.perform_now(
         session.id,
@@ -138,7 +142,18 @@ class VaultAgentIntegrationTest < AgentIntegrationTestCase
     end
 
     with_current_workspace(workspace, user:) do
-      session.messages.where(role: "assistant").order(created_at: :desc).first
+      new_messages = session.messages
+                            .where.not(id: existing_message_ids)
+                            .includes(:tool_calls)
+                            .order(:created_at, :id)
+                            .to_a
+      turn = tool_turn_snapshot(messages: new_messages, tool_name:)
+
+      {
+        assistant_tool_call_names: Array(turn[:assistant_with_tool]&.tool_calls).map(&:name),
+        tool_result_content: turn[:tool_result]&.content.to_s,
+        final_assistant_content: turn[:final_assistant]&.content.to_s
+      }
     end
   end
 
