@@ -401,17 +401,19 @@ worktree_setup() {
 
   # Compute resource names
   local slug_underscored="${slug//-/_}"
-  local db_name rustfs_bucket redis_url cable_redis_url
+  local db_name rustfs_bucket redis_url cable_redis_url vault_local_base
   if [ "$db_mode" = "new" ]; then
     db_name="dailywerk_wt_${slug_underscored}"
     rustfs_bucket="dailywerk-wt-${slug}"
     redis_url="redis://localhost:6399/${redis_db}"
     cable_redis_url="redis://localhost:6399/${redis_db}"
+    vault_local_base="${worktree_dir}/tmp/workspaces"
   else
     db_name=""
     rustfs_bucket=""
     redis_url=""
     cable_redis_url=""
+    vault_local_base="${PARENT_DIR}/vault-workspaces"
   fi
 
   # Write .env.worktree
@@ -429,6 +431,7 @@ CABLE_PREFIX=dailywerk_wt_${slug_underscored}
 GOOD_JOB_QUEUE_PREFIX=wt_${slug_underscored}
 GOOD_JOB_ENABLE_CRON=false
 COMPOSE_PROJECT_NAME=dailywerk
+VAULT_LOCAL_BASE=${vault_local_base}
 ENV_WORKTREE
 
   if [ "$db_mode" = "new" ]; then
@@ -441,6 +444,8 @@ ENV_ISOLATED
   fi
 
   say green "  Generated .env.worktree (port ${port}, vite ${vite_port}, db mode: ${db_mode})"
+  mkdir -p "$vault_local_base"
+  say green "  Prepared vault storage at ${vault_local_base}"
 
   # Install dependencies
   (

@@ -8,7 +8,7 @@ class Vault < ApplicationRecord
 
   TYPES = %w[native obsidian].freeze
   STATUSES = %w[active syncing error suspended].freeze
-  DEFAULT_LOCAL_BASE = Rails.root.join("tmp/workspaces").to_s
+  DEFAULT_LOCAL_BASE = Rails.root.parent.join("vault-workspaces").to_s
 
   encrypts :encryption_key_enc, deterministic: false
 

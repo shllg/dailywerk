@@ -39,8 +39,9 @@ Rails.application.configure do
                                                                  env: "S3_REQUIRE_HTTPS_FOR_SSE_CPK",
                                                                  default: Rails.env.local? ? "false" : "true",
                                                                  force_default: true, type: :boolean)
+  shared_local_vault_base = Rails.root.parent.join("vault-workspaces").to_s
   config.x.vault_s3.local_base = ENV.fetch("VAULT_LOCAL_BASE") {
-    Rails.env.local? ? Rails.root.join("tmp/workspaces").to_s : "/data/workspaces"
+    Rails.env.local? ? shared_local_vault_base : "/data/workspaces"
   }
 
   # Alias for Vault model (reads from config.x.vault_local_base)
