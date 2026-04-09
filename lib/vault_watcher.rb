@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
 # Watches active vault directories and debounces file system events into jobs.
+# Periodically rescans for new vaults created while running.
 class VaultWatcher
   DEBOUNCE_SECONDS = 2
+  RESCAN_INTERVAL_SECONDS = 30
 
   # @return [void]
   def run
@@ -13,6 +15,7 @@ class VaultWatcher
     @pending = {}
     @move_sources = {}
     @watched_dirs = {}
+    @last_rescan = Time.current
 
     setup_watches
     run_loop
@@ -129,13 +132,13 @@ class VaultWatcher
   end
 
   # @return [void]
-  # @return [void]
   def run_loop
     loop do
       readable, = IO.select([ @notifier.to_io ], nil, nil, DEBOUNCE_SECONDS)
       @notifier.process if readable
       flush_pending
       expire_orphaned_move_sources
+      scan_for_new_vaults
     end
   end
 
@@ -166,6 +169,35 @@ class VaultWatcher
       @pending["#{source[:vault_id]}:#{source[:path]}"] = source.merge(event_type: "delete")
       @move_sources.delete(cookie)
     end
+  end
+
+  # Periodically scan for new vaults created while watcher is running.
+  # Attaches inotify watches to vaults that don't have them yet.
+  #
+  # @return [void]
+  def scan_for_new_vaults
+    return if Time.current - @last_rescan < RESCAN_INTERVAL_SECONDS
+
+    @last_rescan = Time.current
+    new_vault_count = 0
+
+    Current.without_workspace_scoping do
+      Vault.active.find_each do |vault|
+        next unless Dir.exist?(vault.local_path)
+        next if vault_already_watched?(vault)
+
+        watch_vault(vault)
+        new_vault_count += 1
+      end
+    end
+
+    Rails.logger.info("[VaultWatcher] Rescanned: attached #{new_vault_count} new vaults") if new_vault_count > 0
+  end
+
+  # @param vault [Vault]
+  # @return [Boolean]
+  def vault_already_watched?(vault)
+    @watched_dirs.key?(vault.local_path)
   end
 
   # @param path [String]

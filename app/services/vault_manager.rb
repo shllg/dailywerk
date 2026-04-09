@@ -10,6 +10,8 @@ class VaultManager
   end
 
   # Creates a new vault, seeds `_dailywerk/`, and prepares remote storage.
+  # Immediately indexes seed files so they appear in the API without waiting
+  # for the file watcher.
   #
   # @param name [String]
   # @param vault_type [String]
@@ -28,6 +30,7 @@ class VaultManager
       FileUtils.mkdir_p(local_path_for(slug))
       seed_default_files(vault)
       sync_seed_files(vault)
+      enqueue_seed_file_jobs(vault)
       refresh_metrics(vault)
       vault
     end
@@ -78,6 +81,17 @@ class VaultManager
 
     %w[_dailywerk/README.md _dailywerk/vault-guide.md].each do |path|
       s3_service.put_object(path, file_service.read(path))
+    end
+  end
+
+  # Immediately enqueue indexing jobs for seed files so they appear
+  # in the API without waiting for the file watcher.
+  #
+  # @param vault [Vault]
+  # @return [void]
+  def enqueue_seed_file_jobs(vault)
+    %w[_dailywerk/README.md _dailywerk/vault-guide.md].each do |path|
+      VaultFileChangedJob.perform_later(vault.id, path, "create", workspace_id: vault.workspace_id)
     end
   end
 
