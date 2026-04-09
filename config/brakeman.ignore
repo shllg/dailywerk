@@ -3,26 +3,14 @@
     {
       "warning_type": "Command Injection",
       "warning_code": 14,
-      "fingerprint": "afbab4f0402c012b2c7afcb53f9c249c73495920d229c3091247b761faa5b077",
+      "fingerprint": "10ab524f3b50b0c3d44b469c355c36d8743cd0d529d7cf565cedb56fcb72a22b",
       "check_name": "Execute",
       "message": "Possible command injection",
       "file": "app/services/obsidian_sync_manager.rb",
-      "line": 78,
+      "line": 120,
       "link": "https://brakemanscanner.org/docs/warning_types/command_injection/",
       "confidence": "Medium",
-      "note": "False positive - Using Process.spawn with array form which avoids shell interpretation. The vault paths are derived from UUIDs (workspace_id, vault_id) and config IDs - not user input. No shell interpolation occurs."
-    },
-    {
-      "warning_type": "Command Injection",
-      "warning_code": 14,
-      "fingerprint": "6404afd376bee72deb91ff567f667eed183ec555a6252e486f38ef8665240900",
-      "check_name": "Execute",
-      "message": "Possible command injection",
-      "file": "app/services/obsidian_sync_manager.rb",
-      "line": 121,
-      "link": "https://brakemanscanner.org/docs/warning_types/command_injection/",
-      "confidence": "Medium",
-      "note": "False positive - Using Process.spawn with array form which avoids shell interpretation. The vault.local_path is derived from workspace_id and vault.slug (UUIDs), not user input. chdir is scoped to this controlled path."
+      "note": "False positive - Process.spawn with individual args does not invoke a shell. vault.local_path is derived from workspace_id (UUID) and vault.slug, not user input."
     }
   ],
   "updated": "2026-04-09",

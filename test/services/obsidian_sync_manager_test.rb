@@ -146,8 +146,9 @@ class ObsidianSyncManagerTest < ActiveSupport::TestCase
     calls = []
     original_capture3 = Open3.method(:capture3)
 
-    Open3.define_singleton_method(:capture3) do |env, cmd, **opts|
-      calls << { env: env, cmd: cmd, opts: opts }
+    Open3.define_singleton_method(:capture3) do |env, *args|
+      opts = args.last.is_a?(Hash) ? args.pop : {}
+      calls << { env: env, cmd: args, opts: opts }
       [ "", "", Struct.new(:success?).new(true) ]
     end
 
@@ -169,7 +170,7 @@ class ObsidianSyncManagerTest < ActiveSupport::TestCase
     calls = []
     original_capture3 = Open3.method(:capture3)
 
-    Open3.define_singleton_method(:capture3) do |env, cmd, **opts|
+    Open3.define_singleton_method(:capture3) do |env, *args|
       calls << { env: env }
       [ "", "", Struct.new(:success?).new(true) ]
     end
@@ -202,8 +203,9 @@ class ObsidianSyncManagerTest < ActiveSupport::TestCase
       calls = []
       original_capture3 = Open3.method(:capture3)
 
-      Open3.define_singleton_method(:capture3) do |env, cmd, **opts|
-        calls << { cmd: cmd }
+      Open3.define_singleton_method(:capture3) do |env, *args|
+        args.pop if args.last.is_a?(Hash)
+        calls << { cmd: args }
         [ "", "", Struct.new(:success?).new(true) ]
       end
 
@@ -234,8 +236,9 @@ class ObsidianSyncManagerTest < ActiveSupport::TestCase
       calls = []
       original_capture3 = Open3.method(:capture3)
 
-      Open3.define_singleton_method(:capture3) do |env, cmd, **opts|
-        calls << { cmd: cmd }
+      Open3.define_singleton_method(:capture3) do |env, *args|
+        args.pop if args.last.is_a?(Hash)
+        calls << { cmd: args }
         [ "", "", Struct.new(:success?).new(true) ]
       end
 
@@ -258,9 +261,17 @@ class ObsidianSyncManagerTest < ActiveSupport::TestCase
     original_capture3 = Open3.method(:capture3)
 
     # Return vault list that includes the configured vault name
-    Open3.define_singleton_method(:capture3) do |env, cmd, **opts|
-      calls << { cmd: cmd }
-      [ "#{config.obsidian_vault_name}\nOther Vault\n", "", Struct.new(:success?).new(true) ]
+    Open3.define_singleton_method(:capture3) do |env, *args|
+      args.pop if args.last.is_a?(Hash)
+      calls << { cmd: args }
+      vault_output = <<~OUTPUT
+        Fetching vaults...
+
+        Vaults:
+        abc123  "#{config.obsidian_vault_name}"  (Europe)
+        def456  "Other Vault"  (Europe)
+      OUTPUT
+      [ vault_output, "", Struct.new(:success?).new(true) ]
     end
 
     manager.send(:verify_vault!)
@@ -289,8 +300,9 @@ class ObsidianSyncManagerTest < ActiveSupport::TestCase
       calls = []
       original_capture3 = Open3.method(:capture3)
 
-      Open3.define_singleton_method(:capture3) do |env, cmd, **opts|
-        calls << { cmd: cmd }
+      Open3.define_singleton_method(:capture3) do |env, *args|
+        args.pop if args.last.is_a?(Hash)
+        calls << { cmd: args }
         [ "", "", Struct.new(:success?).new(true) ]
       end
 
@@ -324,8 +336,9 @@ class ObsidianSyncManagerTest < ActiveSupport::TestCase
       calls = []
       original_capture3 = Open3.method(:capture3)
 
-      Open3.define_singleton_method(:capture3) do |env, cmd, **opts|
-        calls << { cmd: cmd }
+      Open3.define_singleton_method(:capture3) do |env, *args|
+        args.pop if args.last.is_a?(Hash)
+        calls << { cmd: args }
         [ "", "", Struct.new(:success?).new(true) ]
       end
 
@@ -368,7 +381,7 @@ class ObsidianSyncManagerTest < ActiveSupport::TestCase
       manager = ObsidianSyncManager.new(config)
 
       original_capture3 = Open3.method(:capture3)
-      Open3.define_singleton_method(:capture3) do |env, cmd, **opts|
+      Open3.define_singleton_method(:capture3) do |env, *_args|
         [ "", "Unauthorized: Invalid token", Struct.new(:success?).new(false) ]
       end
 
