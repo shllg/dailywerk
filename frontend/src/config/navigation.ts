@@ -52,8 +52,8 @@ export const APP_NAVIGATION: AppNavSection[] = [
         label: 'Vault',
         path: '/vault',
         icon: 'vault',
-        description: 'Obsidian sync, vault guides, and future file browsing.',
-        badge: 'Planned',
+        description: 'Obsidian sync, vault guides, and file browsing.',
+        badge: 'Live',
       },
       {
         label: 'Billing',
